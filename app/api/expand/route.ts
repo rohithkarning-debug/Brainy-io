@@ -1,11 +1,24 @@
 // POST /api/expand
 // Body: { "idea": "...", "purpose": "startup" | "hackathon" | "research" }
-// Returns: { baseline: Version | null, versions: Version[], take: BrainyTake | null, search: SearchReport }
+// Returns: { baseline: Version | null, versions: Version[], take: BrainyTake | null, search: SearchReport, remaining: number | null }
+//
+// GET /api/expand
+// Returns: { remaining: number | null } (runs this visitor has left today; null = no limits)
 
 import { NextResponse } from "next/server";
+import { MAX_IDEA_LENGTH, RUNS_PER_IP_PER_DAY } from "@/lib/limits";
 import { generateVersion, judgeIdea, writeSearchQueries, type BrainyTake, type Version } from "@/lib/openrouter";
 import { PURPOSES, isPurpose } from "@/lib/purposes";
+import { checkUsage, consumeRun, getClientIp, type Usage } from "@/lib/ratelimit";
 import { runSearches, skipAll, type SearchReport, type SearchResult } from "@/lib/search";
+
+// Longest this function may run on Vercel, in seconds. The Hobby (free) plan
+// allows up to 300. A normal run takes 20-60s; the worst case with every
+// timeout hit is about 95s (search chain + models in parallel, then the judge).
+export const maxDuration = 120;
+
+// Always run fresh: remaining-run counts must never be cached.
+export const dynamic = "force-dynamic";
 
 // Cheap models we spread the work across. Swap these for any OpenRouter model ID.
 const MODELS = [
@@ -29,6 +42,27 @@ const JUDGE_MODEL = "anthropic/claude-sonnet-5.5";
 const DIRECTION_PREFIX =
   "You are a creative strategist. Turn the user's half-baked idea into a specific, finished concept. Constraint: ";
 
+// Friendly message for each limit (shown as-is in the UI).
+function limitMessage(blockedBy: "ip" | "global") {
+  return blockedBy === "ip"
+    ? `You've used your ${RUNS_PER_IP_PER_DAY} free runs today, come back tomorrow!`
+    : "Brainy has hit its daily limit for everyone. Come back tomorrow!";
+}
+
+// Shown if Redis is configured but can't be reached. We refuse the run
+// rather than risk unlimited use of the API credits.
+const LIMITS_DOWN = "Brainy can't check usage limits right now. Please try again in a minute.";
+
+export async function GET(req: Request) {
+  try {
+    const usage = await checkUsage(getClientIp(req));
+    return NextResponse.json({ remaining: usage.remaining });
+  } catch (err) {
+    console.warn("Usage check failed:", err instanceof Error ? err.message : err);
+    return NextResponse.json({ remaining: null });
+  }
+}
+
 export async function POST(req: Request) {
   // 1. Read and check the user's idea and purpose.
   const body = await req.json().catch(() => null);
@@ -37,14 +71,30 @@ export async function POST(req: Request) {
   if (!idea) {
     return NextResponse.json({ error: "Please enter an idea." }, { status: 400 });
   }
-  if (idea.length > 2000) {
-    return NextResponse.json({ error: "Idea is too long (max 2000 characters)." }, { status: 400 });
+  if (idea.length > MAX_IDEA_LENGTH) {
+    return NextResponse.json({ error: `Idea is too long (max ${MAX_IDEA_LENGTH} characters).` }, { status: 400 });
   }
   if (!isPurpose(purpose)) {
     return NextResponse.json({ error: "Please pick Startup, Hackathon or Research." }, { status: 400 });
   }
   if (!process.env.OPENROUTER_API_KEY) {
     return NextResponse.json({ error: "Server is missing OPENROUTER_API_KEY." }, { status: 500 });
+  }
+
+  // Use up one of today's runs. Done after the checks above, so invalid
+  // requests don't count. `limitReached` tells the UI to show a friendly note.
+  let usage: Usage;
+  try {
+    usage = await consumeRun(getClientIp(req));
+  } catch (err) {
+    console.warn("Usage limit check failed:", err instanceof Error ? err.message : err);
+    return NextResponse.json({ error: LIMITS_DOWN }, { status: 503 });
+  }
+  if (usage.blockedBy) {
+    return NextResponse.json(
+      { error: limitMessage(usage.blockedBy), limitReached: true, remaining: usage.remaining },
+      { status: 429 }
+    );
   }
 
   // 2. Search for similar existing work. This chain (write queries -> search)
@@ -109,5 +159,5 @@ export async function POST(req: Request) {
     console.warn("Judge failed:", err instanceof Error ? err.message : err);
   }
 
-  return NextResponse.json({ baseline, versions, take, search: search.report });
+  return NextResponse.json({ baseline, versions, take, search: search.report, remaining: usage.remaining });
 }

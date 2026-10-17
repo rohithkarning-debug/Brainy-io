@@ -1,6 +1,7 @@
 "use client"; // this page uses state and click handlers, so it runs in the browser
 
 import { useEffect, useState } from "react";
+import { MAX_IDEA_LENGTH, RUNS_PER_IP_PER_DAY } from "@/lib/limits";
 import type { BrainyTake, SimilarThing, Version } from "@/lib/openrouter";
 import { PURPOSES, PURPOSE_KEYS, SOURCE_LABELS, type Purpose, type SearchSource } from "@/lib/purposes";
 import type { SearchReport } from "@/lib/search";
@@ -21,11 +22,24 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [results, setResults] = useState<Results | null>(null);
+  // Runs left today (null = no limits, e.g. local dev) and the friendly
+  // "come back tomorrow" note shown when a limit is hit.
+  const [remaining, setRemaining] = useState<number | null>(null);
+  const [limitNote, setLimitNote] = useState("");
+
+  // On page load, ask the server how many runs this visitor has left.
+  useEffect(() => {
+    fetch("/api/expand")
+      .then((res) => res.json())
+      .then((data) => setRemaining(data.remaining ?? null))
+      .catch(() => {}); // not important enough to show an error
+  }, []);
 
   // Send the idea to our API route and show the results.
   async function expandIdea() {
     setLoading(true);
     setError("");
+    setLimitNote("");
     setResults(null);
     try {
       const res = await fetch("/api/expand", {
@@ -34,6 +48,11 @@ export default function Home() {
         body: JSON.stringify({ idea, purpose }),
       });
       const data = await res.json();
+      if (data.remaining !== undefined) setRemaining(data.remaining);
+      if (data.limitReached) {
+        setLimitNote(data.error);
+        return;
+      }
       if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
       setResults({ purpose, ...data });
     } catch (err) {
@@ -79,24 +98,33 @@ export default function Home() {
               onChange={(e) => setIdea(e.target.value)}
               placeholder="e.g. an app that helps people swap houseplants"
               rows={4}
-              maxLength={2000}
+              maxLength={MAX_IDEA_LENGTH}
               className="mt-5 w-full resize-y rounded-xl border border-line bg-white p-4 text-base text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-accent/60 focus:ring-4 focus:ring-accent/10"
             />
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <span className="text-xs tabular-nums text-slate-400">{idea.length}/2000</span>
-              <button
-                onClick={expandIdea}
-                disabled={loading || !idea.trim()}
-                className="group inline-flex items-center gap-1.5 rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-[0_4px_14px_-4px] shadow-accent/60 transition hover:bg-accent-dark hover:shadow-[0_8px_24px_-6px] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
-              >
-                {loading ? "Thinking…" : "Expand idea"}
-                {!loading && (
-                  <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
-                    →
+              <span className="text-xs tabular-nums text-slate-400">
+                {idea.length}/{MAX_IDEA_LENGTH}
+              </span>
+              <div className="flex items-center gap-3">
+                {remaining !== null && (
+                  <span className="text-xs tabular-nums text-slate-400">
+                    {remaining} of {RUNS_PER_IP_PER_DAY} free runs left today
                   </span>
                 )}
-              </button>
+                <button
+                  onClick={expandIdea}
+                  disabled={loading || !idea.trim() || remaining === 0}
+                  className="group inline-flex items-center gap-1.5 rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-[0_4px_14px_-4px] shadow-accent/60 transition hover:bg-accent-dark hover:shadow-[0_8px_24px_-6px] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
+                >
+                  {loading ? "Thinking…" : "Expand idea"}
+                  {!loading && (
+                    <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
+                      →
+                    </span>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -105,6 +133,13 @@ export default function Home() {
       {/* ---------- Loading, errors and results ---------- */}
       <main className="mx-auto max-w-6xl px-4 pb-24 sm:px-6">
         {loading && <LoadingState purpose={purpose} />}
+
+        {/* Daily limit reached: a calm note, not a red error */}
+        {limitNote && (
+          <p className="mt-10 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">
+            {limitNote}
+          </p>
+        )}
 
         {error && (
           <p className="mt-10 max-w-3xl rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-700">{error}</p>
