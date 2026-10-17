@@ -1,0 +1,81 @@
+﻿@import "tailwindcss";
+
+/* Brainy's light theme: off-white canvas, crisp slate text, one indigo-violet accent. */
+@theme inline {
+  --color-canvas: #f7f8fb; /* page background */
+  --color-line: #e4e7ee; /* card borders */
+  --color-accent: #5b47e6; /* the Brainy indigo */
+  --color-accent-dark: #4934d1; /* button hover */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Soft layered shadows: a tight one for edges plus a wide, faint one for depth. */
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px -4px rgb(15 23 42 / 0.06);
+  --shadow-lift: 0 2px 4px rgb(15 23 42 / 0.04), 0 20px 40px -12px rgb(45 40 120 / 0.18);
+  --shadow-hero: 0 4px 8px rgb(15 23 42 / 0.04), 0 40px 80px -24px rgb(70 50 180 / 0.28);
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-canvas);
+  color: #0f172a;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Hero mesh: four blurred color blobs drifting slowly around each other. */
+@keyframes drift-a {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(8%, 6%) scale(1.1); }
+}
+@keyframes drift-b {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-10%, 8%) scale(0.95); }
+}
+@keyframes drift-c {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(6%, -8%) scale(1.15); }
+}
+.animate-drift-a { animation: drift-a 18s ease-in-out infinite; }
+.animate-drift-b { animation: drift-b 22s ease-in-out infinite; }
+.animate-drift-c { animation: drift-c 26s ease-in-out infinite; }
+
+/* Content entering: slides up a little and fades in. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-rise-in {
+  animation: rise-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Loading bar: an accent streak sweeping left to right. */
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+.animate-sweep {
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-drift-a,
+  .animate-drift-b,
+  .animate-drift-c,
+  .animate-rise-in,
+  .animate-sweep {
+    animation: none;
+  }
+}
