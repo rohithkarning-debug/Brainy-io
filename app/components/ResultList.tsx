@@ -6,12 +6,13 @@ import { SATURATION_STYLES } from "@/app/components/BrainyTakeCard";
 import { useToast } from "@/app/components/Toast";
 import { Icon, IconButton } from "@/app/components/ui";
 import { formatDate } from "@/lib/format";
-import { clearHistory, removeResult, togglePin, useHistory, type Result } from "@/lib/history";
+import { clearHistory, hasSaved, removeResult, togglePin, useHistory, type Result } from "@/lib/history";
 import { PURPOSES, PURPOSE_KEYS, type Purpose } from "@/lib/purposes";
 
 // Everything a search can match: the idea and every title in the result.
 function searchText(r: Result) {
-  return [r.idea, r.take?.pick.title, ...r.versions.map((v) => v.title)].join(" ").toLowerCase();
+  const bred = r.lineage?.offspring ?? [];
+  return [r.idea, r.take?.pick.title, ...r.versions.map((v) => v.title), ...bred.map((o) => o.title)].join(" ").toLowerCase();
 }
 
 /** The History page (every result) or the Saved page (pinned only). */
@@ -32,7 +33,7 @@ export function ResultList({ mode }: { mode: "history" | "saved" }) {
     );
   }
 
-  const base = mode === "saved" ? all.filter((r) => r.pinned) : all;
+  const base = mode === "saved" ? all.filter(hasSaved) : all;
   const q = query.trim().toLowerCase();
   const items = base.filter((r) => (purpose === "all" || r.purpose === purpose) && (!q || searchText(r).includes(q)));
 
@@ -106,6 +107,7 @@ export function ResultList({ mode }: { mode: "history" | "saved" }) {
                     </span>
                   )}
                   {r.status !== "done" && <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium">Partial</span>}
+                  <BredBadge result={r} />
                   <span>{formatDate(r.createdAt)}</span>
                   {r.take && <span className="truncate">· Pick: {r.take.pick.title}</span>}
                 </div>
@@ -164,5 +166,17 @@ export function ResultList({ mode }: { mode: "history" | "saved" }) {
         </div>
       )}
     </div>
+  );
+}
+
+// "6 bred · 1 saved": ideas bred from this result, if any.
+function BredBadge({ result }: { result: Result }) {
+  const bred = result.lineage?.offspring ?? [];
+  if (bred.length === 0) return null;
+  const saved = bred.filter((o) => o.saved).length;
+  return (
+    <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium">
+      {bred.length} bred{saved > 0 && ` · ${saved} saved`}
+    </span>
   );
 }

@@ -2,6 +2,7 @@
 // /result/[id] page all read from here. Browser-only.
 
 import { useSyncExternalStore } from "react";
+import type { Lineage } from "@/lib/lineage";
 import { createLocalStore } from "@/lib/local-store";
 import type { BrainyTake, Version } from "@/lib/openrouter";
 import type { Purpose } from "@/lib/purposes";
@@ -29,7 +30,13 @@ export type Result = {
   outOfJuice?: boolean; // the server key's free fuel was out (daily pool used up, or every model out of credits)
   keyProblem?: boolean; // the visitor's own key was refused or out of credits
   pinned?: boolean; // shown on the Saved page; survives "Clear history"
+  lineage?: Lineage; // ideas bred from this result (see lib/lineage.ts); absent on older results
 };
+
+/** True if the result, or any idea bred from it, is saved. Saved results survive "Clear history". */
+export function hasSaved(r: Result): boolean {
+  return Boolean(r.pinned || r.lineage?.offspring?.some((o) => o.saved));
+}
 
 // Unpinned results we keep; older ones drop off so localStorage stays small.
 const MAX_UNPINNED = 50;
@@ -43,13 +50,25 @@ export function useHistory(): Result[] | null {
   return useSyncExternalStore(store.subscribe, store.get, () => null);
 }
 
-/** Add or replace a result, keeping its pinned flag if it was already saved. */
+/** Add or replace a result, keeping its pinned flag and bred ideas if it was already saved. */
 export function saveResult(result: Result) {
   const list = store.get();
-  const pinned = list.find((r) => r.id === result.id)?.pinned ?? result.pinned;
+  const before = list.find((r) => r.id === result.id);
+  const pinned = before?.pinned ?? result.pinned;
+  const lineage = result.lineage ?? before?.lineage;
   let unpinned = 0;
-  const rest = list.filter((r) => r.id !== result.id && (r.pinned || ++unpinned < MAX_UNPINNED));
-  store.set([{ ...result, pinned }, ...rest]);
+  const rest = list.filter((r) => r.id !== result.id && (hasSaved(r) || ++unpinned < MAX_UNPINNED));
+  store.set([{ ...result, pinned, lineage }, ...rest]);
+}
+
+/** Change one stored result in place (e.g. add bred ideas). No-op if it isn't stored. */
+export function updateResult(id: string, change: (r: Result) => Partial<Result>) {
+  store.set(store.get().map((r) => (r.id === id ? { ...r, ...change(r) } : r)));
+}
+
+/** A stored result, for event handlers (not for rendering). */
+export function getResult(id: string): Result | undefined {
+  return store.get().find((r) => r.id === id);
 }
 
 export function removeResult(id: string) {
@@ -69,7 +88,7 @@ export function togglePin(id: string): boolean {
   return pinned;
 }
 
-/** Clear history but keep saved (pinned) results. */
+/** Clear history but keep saved results (pinned, or with a saved bred idea). */
 export function clearHistory() {
-  store.set(store.get().filter((r) => r.pinned));
+  store.set(store.get().filter(hasSaved));
 }

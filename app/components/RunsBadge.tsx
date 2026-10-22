@@ -8,13 +8,14 @@ import { useFuelOut, useRemaining } from "@/lib/run";
  * "3 free runs left today", "Using your key" or "Free fuel is out".
  * Shows nothing until the count is known, or when limits are off.
  * Whoever renders it calls refreshRemaining() to load the count.
+ * `className` sets the display (default inline-flex), e.g. "hidden lg:inline-flex".
  */
-export function RunsBadge({ className = "" }: { className?: string }) {
+export function RunsBadge({ className = "inline-flex" }: { className?: string }) {
   const remaining = useRemaining();
   const fuelOut = useFuelOut();
   const ownKey = Boolean(useKeys().openrouter);
 
-  const base = `inline-flex items-center gap-1.5 whitespace-nowrap rounded-full text-xs tabular-nums ${className}`;
+  const base = `items-center gap-1.5 whitespace-nowrap rounded-full text-xs tabular-nums ${className}`;
 
   if (ownKey) {
     return (

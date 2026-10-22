@@ -196,6 +196,50 @@ body {
   animation: rise-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
+/* A newly bred idea: rises in grey, then blooms into colour with a soft
+   violet halo. Only the card, never the whole page. */
+@keyframes offspring-bloom {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+    filter: grayscale(1);
+    box-shadow: 0 0 0 0 transparent;
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: grayscale(1);
+  }
+  60% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-reveal-violet) 22%, transparent);
+  }
+  100% {
+    filter: grayscale(0);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.animate-offspring-bloom {
+  animation: offspring-bloom 1.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* The same bloom for a new node in the family tree (SVG: no transforms, they'd move the node). */
+@keyframes node-bloom {
+  from {
+    opacity: 0;
+    filter: grayscale(1);
+  }
+  40% {
+    opacity: 1;
+    filter: grayscale(1);
+  }
+  to {
+    filter: grayscale(0);
+  }
+}
+.animate-node-bloom {
+  animation: node-bloom 1.8s ease-out both;
+}
+
 /* Page change: a quicker, smaller rise. */
 .animate-page-in {
   animation: rise-in 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;

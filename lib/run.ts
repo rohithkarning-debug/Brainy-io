@@ -92,6 +92,11 @@ export function useFuelOut(): boolean {
   );
 }
 
+/** Record a free-run count (and fuel state) reported by another route, e.g. /api/cross. */
+export function noteUsage(value: number | null | undefined, out?: boolean) {
+  setRemaining(value === undefined ? (remaining ?? null) : value, out);
+}
+
 function setRemaining(value: number | null, out?: boolean) {
   remaining = value;
   if (out !== undefined) fuelOut = out;

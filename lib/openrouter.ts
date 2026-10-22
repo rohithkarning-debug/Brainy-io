@@ -1,6 +1,7 @@
 // Small helper for talking to OpenRouter (https://openrouter.ai).
 // OpenRouter gives us one API that can call many different LLMs.
 
+import type { ParentIdea } from "@/lib/lineage";
 import { PURPOSES, SOURCE_LABELS, type Purpose } from "@/lib/purposes";
 import type { SearchQueries, SearchResult } from "@/lib/search";
 
@@ -386,4 +387,118 @@ function parseSimilar(raw: unknown, results: SearchResult[] | null): SimilarThin
     }
   }
   return out.slice(0, 8);
+}
+
+// ---------- Idea breeding (see lib/lineage.ts) ----------
+
+// What one offspring looks like before it gets an id and a place in the tree.
+export type OffspringJSON = IdeaJSON & { inherits: string };
+
+const CROSS_PROMPT = `You breed ideas. You get the user's original idea and two PARENT ideas (A and B). Produce exactly 3 OFFSPRING ideas.
+
+Each offspring must genuinely combine the parents: take one specific, load-bearing trait from A (a customer, mechanism, business model, method, constraint or medium) and one from B, and fuse them into ONE coherent new concept that neither parent is on its own. Do not just bolt them together ("A plus B", "A with B's features"); the fused trait should change how the idea works. The 3 offspring must differ from each other: inherit different traits each time.
+
+For each offspring write "inherits" as one line in this form: "Inherits <trait> from <parent A title>, <trait> from <parent B title>".`;
+
+/**
+ * Cross two parent ideas into 3 offspring. `models` is tried in order.
+ * Throws if every call fails or the reply is unusable.
+ */
+export async function crossIdeas(
+  models: string[],
+  idea: string,
+  purpose: Purpose,
+  parents: [ParentIdea, ParentIdea],
+  { style, maxTokens = 800, signal, apiKey }: CallOptions = {}
+): Promise<{ offspring: OffspringJSON[]; model: string }> {
+  const { guidance, fields } = PURPOSES[purpose];
+  const shape = JSON.stringify({
+    offspring: [
+      {
+        title: "short catchy name",
+        pitch: "one sentence",
+        ...Object.fromEntries(fields.map((f) => [f.key, f.hint])),
+        inherits: "Inherits ... from ..., ... from ...",
+      },
+    ],
+  });
+  const system = `${CROSS_PROMPT}\n\n${guidance}${style ? `\n\n${style}` : ""}\n\nRespond with ONLY a JSON object, no markdown, no extra text, in exactly this shape (3 items in "offspring"):\n${shape}`;
+
+  const describe = (p: ParentIdea, tag: string) =>
+    `Parent ${tag} [${p.label}] ${p.title}: ${p.pitch}\n` + fields.map((f) => `   ${f.label}: ${p.details[f.key] ?? ""}`).join("\n");
+  const user = `Purpose: ${PURPOSES[purpose].label}\n\nOriginal idea:\n${idea}\n\n${describe(parents[0], "A")}\n\n${describe(parents[1], "B")}`;
+
+  // Three ideas in one reply, so roughly three times one version's budget.
+  const { text, model } = await callWithFallback(models, system, user, {
+    temperature: 0.9,
+    timeoutMs: 45_000,
+    maxTokens: Math.min(maxTokens * 3, 3600),
+    signal,
+    apiKey,
+  });
+  const obj = extractJSON(text);
+  const list: unknown[] = Array.isArray(obj.offspring) ? obj.offspring : [];
+
+  const offspring = list.flatMap((raw): OffspringJSON[] => {
+    const o = raw as Record<string, unknown>;
+    const keys = ["title", "pitch", "inherits", ...fields.map((f) => f.key)];
+    if (!keys.every((k) => isText(o[k]))) return [];
+    return [
+      {
+        title: o.title as string,
+        pitch: o.pitch as string,
+        inherits: (o.inherits as string).trim().slice(0, 300),
+        details: Object.fromEntries(fields.map((f) => [f.key, o[f.key] as string])),
+      },
+    ];
+  });
+  if (offspring.length === 0) throw new Error("No usable offspring");
+  return { offspring: offspring.slice(0, 3), model };
+}
+
+const GENERATION_JUDGE_PROMPT = `You are Brainy, a brutally honest judge of ideas. You get a user's original idea and a numbered set of OFFSPRING ideas bred from it. Each says what it inherits from its parents.
+
+1. For EACH offspring, write one honest line: what's strong or weak about it.
+2. Pick the single offspring most worth chasing: the most unique idea that could still work. Refer to it by its id. Explain why in one or two sentences.
+
+Only use the ids you were given. Respond with ONLY a JSON object, no markdown, in exactly this shape:
+{"notes": [{"id": "...", "note": "one line"}], "pickId": "...", "why": "one or two sentences"}`;
+
+/**
+ * Judge a set of offspring. Returns the picked id, why, and a note per offspring.
+ * Ids not in the input are dropped, so the verdict can only talk about real offspring.
+ */
+export async function judgeOffspring(
+  models: string[],
+  idea: string,
+  purpose: Purpose,
+  offspring: (ParentIdea & { id: string; inherits: string })[],
+  { style, signal, apiKey }: CallOptions = {}
+): Promise<{ pickId: string; why: string; notes: { id: string; note: string }[]; model: string }> {
+  const { label, fields } = PURPOSES[purpose];
+  const list = offspring
+    .map(
+      (o) =>
+        `- id ${o.id}: ${o.title}: ${o.pitch}\n   ${o.inherits}\n` +
+        fields.map((f) => `   ${f.label}: ${o.details[f.key] ?? ""}`).join("\n")
+    )
+    .join("\n\n");
+  const user = `Purpose: ${label}\n\nOriginal idea:\n${idea}\n\nOffspring:\n${list}`;
+  const system = [GENERATION_JUDGE_PROMPT, style].filter(Boolean).join(" ");
+
+  const { text, model } = await callWithFallback(models, system, user, {
+    temperature: 0.4,
+    timeoutMs: 60_000,
+    maxTokens: 1500,
+    signal,
+    apiKey,
+  });
+  const obj = extractJSON(text);
+  const ids = new Set(offspring.map((o) => o.id));
+  const pickId = String(obj.pickId ?? "");
+  if (!ids.has(pickId)) throw new Error("Judge picked an unknown offspring");
+  const notes = (Array.isArray(obj.notes) ? obj.notes : [])
+    .filter((n: { id?: unknown; note?: unknown }) => ids.has(String(n?.id)) && isText(n?.note))
+    .map((n: { id: unknown; note: string }) => ({ id: String(n.id), note: n.note.trim().slice(0, 300) }));
+  return { pickId, why: isText(obj.why) ? obj.why.trim() : "", notes, model };
 }

@@ -6,6 +6,9 @@ import { FREE_MODELS } from "@/lib/openrouter";
 // bred generations). Set JUDGE_MODEL to any OpenRouter model ID; defaults to a free one.
 export const JUDGE_MODEL = process.env.JUDGE_MODEL?.trim() || FREE_MODELS[0];
 
+// Crossing two ideas: a cheap, quick model that follows a JSON shape well.
+export const CROSS_MODEL = "openai/gpt-4o-mini";
+
 // The model to try first, then the free models if it's out of credits,
 // rate-limited or down. `offset` rotates where the free list starts, so
 // parallel calls don't all land on the same free model and hit its rate limit.

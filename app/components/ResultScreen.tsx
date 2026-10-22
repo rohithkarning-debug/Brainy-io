@@ -6,19 +6,22 @@ import { useEffect, useLayoutEffect, useState } from "react";
 import { BrainyTakeCard } from "@/app/components/BrainyTakeCard";
 import { CookingLoader, SkeletonCard } from "@/app/components/CookingLoader";
 import { useCopyShare } from "@/app/components/CopyShare";
+import { CrossBar, LineagePanel } from "@/app/components/Lineage";
 import { useToast } from "@/app/components/Toast";
 import { ActionButton, SectionTitle, TabPanel, Tabs } from "@/app/components/ui";
 import { VersionCard } from "@/app/components/VersionCard";
+import { crossNodes, isBreedError, type BreedError } from "@/lib/breed";
 import { formatDate, resultToText, sourceList } from "@/lib/format";
 import { togglePin, useHistory, type Result } from "@/lib/history";
 import { useKeys } from "@/lib/keys";
+import { directionNodeId, readLineage, type Lineage, type NodeId } from "@/lib/lineage";
 import { PURPOSES } from "@/lib/purposes";
 import { startRun, stopRun, useRun } from "@/lib/run";
 import { setCooked } from "@/lib/reveal";
 import { useMotionAllowed, useSettings } from "@/lib/settings";
 import { LENGTHS, TONES } from "@/lib/style";
 
-type Tab = "verdict" | "directions" | "baseline";
+type Tab = "verdict" | "directions" | "baseline" | "lineage";
 
 /** /result/[id]: a run still cooking in this tab, or a result from history. */
 export function ResultScreen({ id }: { id: string }) {
@@ -29,7 +32,17 @@ export function ResultScreen({ id }: { id: string }) {
 
   if (!result) return history === null ? <ResultSkeleton /> : <NotFound />;
   // key: a fresh view (tabs, toggles) for every result
-  return <ResultView key={id} result={result} live={live !== null} pinned={saved?.pinned ?? false} stored={saved !== null} />;
+  // Bred ideas are only ever written to the stored copy, so read them from there.
+  return (
+    <ResultView
+      key={id}
+      result={result}
+      live={live !== null}
+      pinned={saved?.pinned ?? false}
+      stored={saved !== null}
+      lineage={saved?.lineage}
+    />
+  );
 }
 
 /**
@@ -42,12 +55,14 @@ export function ResultView({
   pinned = false,
   stored = false,
   example = false,
+  lineage: storedLineage,
 }: {
   result: Result;
   live?: boolean;
   pinned?: boolean;
   stored?: boolean;
   example?: boolean;
+  lineage?: Lineage;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -78,6 +93,39 @@ export function ResultView({
     setCooked(false, { animate: false });
     // Wait for the instant switch back to mono to paint, then bloom again.
     setTimeout(() => setCooked(true), 80);
+  }
+
+  // ---------- Breeding: pick two ideas, cross them into offspring ----------
+  const lineage = readLineage(storedLineage);
+  // Only on a finished, stored result (bred ideas are saved into it), never the home-page sample.
+  const canBreed = finished && stored && !example;
+  const [selected, setSelected] = useState<NodeId[]>([]);
+  const [crossing, setCrossing] = useState(false);
+  const [crossError, setCrossError] = useState<BreedError | null>(null);
+  const [freshIds, setFreshIds] = useState<Set<string>>(() => new Set());
+  // Directions in their usual order, for the tree.
+  const orderedVersions = directions.flatMap((d) => result.versions.filter((v) => v.direction === d.label));
+
+  function toggleSelected(id: NodeId) {
+    setCrossError(null);
+    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length < 2 ? [...s, id] : s));
+  }
+  const canSelect = (id: NodeId) => selected.includes(id) || selected.length < 2;
+
+  async function cross() {
+    if (selected.length !== 2) return;
+    setCrossing(true);
+    setCrossError(null);
+    const born = await crossNodes(result, [selected[0], selected[1]]);
+    setCrossing(false);
+    if (isBreedError(born)) {
+      setCrossError(born);
+      return;
+    }
+    setFreshIds((f) => new Set([...f, ...born]));
+    setSelected([]);
+    setTab("lineage");
+    toast(`${born.length} new ideas bred`);
   }
 
   // The direction the judge built its pick on gets highlighted after the reveal.
@@ -129,6 +177,21 @@ export function ResultView({
       ),
     },
     { id: "baseline", label: "Baseline" },
+    ...(canBreed
+      ? [
+          {
+            id: "lineage" as const,
+            label: (
+              <>
+                Lineage
+                {lineage.offspring.length > 0 && (
+                  <span className="rounded-full bg-slate-200/70 px-1.5 text-xs tabular-nums">{lineage.offspring.length}</span>
+                )}
+              </>
+            ),
+          },
+        ]
+      : []),
   ];
 
   const Heading = example ? "h3" : "h1";
@@ -280,6 +343,7 @@ export function ResultView({
               {directions.map((d, i) => {
                 const version = result.versions.find((v) => v.direction === d.label);
                 if (version) {
+                  const node = directionNodeId(d.label);
                   return (
                     <VersionCard
                       key={d.label}
@@ -289,6 +353,11 @@ export function ResultView({
                       detailsOpen={detailsOpen}
                       colorIndex={i}
                       picked={d.label.toLowerCase() === pickedDirection}
+                      select={
+                        canBreed
+                          ? { checked: selected.includes(node), disabled: !canSelect(node), onChange: () => toggleSelected(node) }
+                          : undefined
+                      }
                     />
                   );
                 }
@@ -309,6 +378,33 @@ export function ResultView({
               )}
             </div>
           </TabPanel>
+
+          {canBreed && (
+            <TabPanel id="lineage" active={tab === "lineage"}>
+              <LineagePanel
+                result={result}
+                versions={orderedVersions}
+                lineage={lineage}
+                selected={selected}
+                canSelect={canSelect}
+                onToggle={toggleSelected}
+                freshIds={freshIds}
+                stored={stored}
+              />
+            </TabPanel>
+          )}
+
+          {canBreed && (tab === "directions" || tab === "lineage") && (
+            <CrossBar
+              result={result}
+              lineage={lineage}
+              selected={selected}
+              onRemove={toggleSelected}
+              onCross={cross}
+              crossing={crossing}
+              error={crossError}
+            />
+          )}
         </div>
       )}
     </div>

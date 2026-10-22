@@ -2,7 +2,7 @@
 
 import { CopyShareButtons } from "@/app/components/CopyShare";
 import { TypeText } from "@/app/components/TypeText";
-import { Disclosure } from "@/app/components/ui";
+import { Disclosure, IconButton } from "@/app/components/ui";
 import { versionToText } from "@/lib/format";
 import type { Version } from "@/lib/openrouter";
 import { PURPOSES, type Purpose } from "@/lib/purposes";
@@ -13,6 +13,12 @@ const REVEAL_COLORS = ["violet", "pink", "orange", "cyan"];
 // One card showing a single version of the idea, with fields for its purpose.
 // `live` = it just arrived from a run, so the pitch types itself out.
 // `picked` = the judge built its pick on this direction; highlighted once cooked.
+// Bred ideas (lib/lineage.ts) also pass:
+//   `select`   a "Select to cross" checkbox
+//   `inherits` the "Inherits X from A, Y from B" line
+//   `save`     a save toggle
+//   `fresh`    just born: blooms from grey into colour
+//   `note`     the judge's one line on it
 export function VersionCard({
   version,
   purpose,
@@ -21,6 +27,12 @@ export function VersionCard({
   detailsOpen = true,
   colorIndex = 0,
   picked = false,
+  select,
+  inherits,
+  save,
+  fresh = false,
+  note,
+  id,
 }: {
   version: Version;
   purpose: Purpose;
@@ -29,14 +41,23 @@ export function VersionCard({
   detailsOpen?: boolean;
   colorIndex?: number;
   picked?: boolean;
+  select?: { checked: boolean; disabled: boolean; onChange: () => void };
+  inherits?: string;
+  save?: { saved: boolean; onToggle: () => void };
+  fresh?: boolean;
+  note?: string;
+  id?: string;
 }) {
   return (
     <article
-      className={`animate-rise-in relative flex h-full flex-col gap-3 rounded-2xl border p-6 transition duration-200 ${
+      id={id}
+      className={`relative flex h-full scroll-mt-28 flex-col gap-3 rounded-2xl border p-6 transition duration-200 ${
+        fresh ? "animate-offspring-bloom" : "animate-rise-in"
+      } ${
         muted
           ? "border-dashed border-slate-300 bg-slate-50/60"
           : "border-line bg-surface shadow-card hover:-translate-y-1 hover:shadow-lift"
-      } ${picked ? "cooked:ring-2 cooked:ring-accent" : ""}`}
+      } ${picked ? "cooked:ring-2 cooked:ring-accent" : ""} ${select?.checked ? "ring-2 ring-accent" : ""}`}
     >
       {!muted && (
         <span
@@ -62,7 +83,8 @@ export function VersionCard({
           )}
           <span className="break-all font-mono text-slate-400">{version.model}</span>
         </div>
-        <div className="-mr-2 -mt-1 shrink-0">
+        <div className="-mr-2 -mt-1 flex shrink-0">
+          {save && <IconButton icon="bookmark" label={save.saved ? "Unsave" : "Save"} active={save.saved} onClick={save.onToggle} />}
           <CopyShareButtons title={version.title} text={versionToText(version, purpose)} />
         </div>
       </div>
@@ -71,6 +93,13 @@ export function VersionCard({
       <p className="leading-relaxed text-slate-600">
         <TypeText text={version.pitch} animate={live} />
       </p>
+      {inherits && <p className="-mt-1 text-xs italic leading-relaxed text-slate-500">{inherits}</p>}
+      {note && (
+        <p className="rounded-lg bg-slate-100 px-3 py-2 text-xs leading-relaxed text-slate-600">
+          <span className="font-semibold text-slate-800">Judge: </span>
+          {note}
+        </p>
+      )}
 
       <div className="mt-auto border-t border-line pt-3">
         <Disclosure defaultOpen={detailsOpen} summary={<span className="text-xs font-medium text-slate-500">Details</span>}>
@@ -84,6 +113,22 @@ export function VersionCard({
           </dl>
         </Disclosure>
       </div>
+
+      {select && (
+        <label
+          className={`-mb-1 flex items-center gap-2 text-sm font-medium ${select.disabled ? "cursor-not-allowed text-slate-400" : "cursor-pointer text-slate-700"}`}
+        >
+          <input
+            type="checkbox"
+            checked={select.checked}
+            disabled={select.disabled}
+            onChange={select.onChange}
+            aria-label={`Select “${version.title}” to cross`}
+            className="h-4 w-4 rounded border-line accent-[var(--color-accent)]"
+          />
+          {select.checked ? "Selected to cross" : "Select to cross"}
+        </label>
+      )}
     </article>
   );
 }

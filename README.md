@@ -39,6 +39,21 @@ applies). Free runs on the server key share a global daily pool,
 key returns 402/429, visitors see "Brainy's free fuel is out for today" with a
 link to add their own key.
 
+## Idea breeding
+
+On a finished result, select exactly two ideas (directions on the Directions tab,
+or any node in the tree) and press **Cross**: one model call (`/api/cross`) breeds
+3 offspring that fuse a trait from each parent, each with an "Inherits X from A,
+Y from B" line. Offspring can be crossed again (generation 2, 3, ...), saved, and
+judged per generation (`/api/judge-generation`). Each cross or judge counts as
+one run, or one own-key run.
+
+The tree lives in the stored result as `lineage` (`lib/lineage.ts`, `lib/breed.ts`),
+so History and Saved reopen it; older results simply have none. The Lineage tab
+draws it as plain SVG (`app/components/LineageTree.tsx`): left to right on wide
+screens, top to bottom on narrow ones, with pan, pinch / Ctrl+scroll zoom and
+ancestor lines lit on hover or focus.
+
 ## Sign-in
 
 Google and GitHub sign-in via Auth.js v5 (`auth.ts`), with JWT sessions, so no database.
