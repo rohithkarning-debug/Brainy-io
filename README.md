@@ -19,6 +19,11 @@ Redis config is read from `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`,
 falling back to `KV_REST_API_URL` / `KV_REST_API_TOKEN` (the names Vercel's
 Upstash integration creates), so either pair works.
 
+`JUDGE_MODEL` picks the model behind Brainy's Take (any OpenRouter model ID); it
+defaults to a free one. If any model call gets HTTP 402 (out of credits), 429
+(rate-limited) or 5xx, Brainy retries with the free models in `FREE_MODELS`
+(`lib/openrouter.ts`). Free models have their own daily request caps on OpenRouter.
+
 ## How it fits together
 
 - `app/api/expand/route.ts`: the only place API keys are used. `POST` streams

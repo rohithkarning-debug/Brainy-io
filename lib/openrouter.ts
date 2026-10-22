@@ -52,6 +52,31 @@ export type CallOptions = {
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
+// Free OpenRouter models (checked October 2026; see https://openrouter.ai/models?q=free).
+// Used as the fallback chain when a model is out of credits, rate-limited or down.
+// Free models have their own daily request limits, so this is a safety net, not a plan.
+export const FREE_MODELS = [
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "google/gemma-4-31b-it:free",
+];
+
+// Statuses worth trying another model for: out of credits, rate-limited, or down.
+function shouldFallBack(status: number) {
+  return status === 402 || status === 429 || status >= 500;
+}
+
+// A non-2xx reply from OpenRouter, keeping the status so we can decide whether to fall back.
+class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+type CallSettings = { temperature?: number; timeoutMs?: number; maxTokens?: number; signal?: AbortSignal };
+
 /**
  * Send one system + user message to a model and return its raw text reply.
  * Throws on HTTP errors or timeouts.
@@ -60,12 +85,7 @@ async function callModel(
   model: string,
   system: string,
   user: string,
-  {
-    temperature = 0.9,
-    timeoutMs = 30_000,
-    maxTokens = 800,
-    signal,
-  }: { temperature?: number; timeoutMs?: number; maxTokens?: number; signal?: AbortSignal } = {}
+  { temperature = 0.9, timeoutMs = 30_000, maxTokens = 800, signal }: CallSettings = {}
 ): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
@@ -87,6 +107,9 @@ async function callModel(
       // Cap the reply length. Without this OpenRouter reserves the model's full
       // output limit up front, which can fail on low-credit keys.
       max_tokens: maxTokens,
+      // The free fallbacks are reasoning models. Keep their thinking short so it
+      // doesn't eat the max_tokens budget, and leave it out of the reply.
+      ...(model.endsWith(":free") && { reasoning: { effort: "low", exclude: true } }),
     }),
     // Give up on a slow model instead of hanging forever, and stop paying
     // for the call as soon as the visitor cancels.
@@ -94,11 +117,35 @@ async function callModel(
   });
 
   if (!res.ok) {
-    throw new Error(`${model} returned HTTP ${res.status}: ${await res.text()}`);
+    throw new HttpError(res.status, `${model} returned HTTP ${res.status}: ${await res.text()}`);
   }
 
   const data = await res.json();
   return data?.choices?.[0]?.message?.content ?? "";
+}
+
+/**
+ * Try each model in turn until one answers. Only moves on for 402/429/5xx;
+ * any other error (bad request, timeout, cancelled) is thrown straight away.
+ * Returns the reply and the model that produced it.
+ */
+async function callWithFallback(
+  models: string[],
+  system: string,
+  user: string,
+  settings: CallSettings = {}
+): Promise<{ text: string; model: string }> {
+  let lastError: unknown = new Error("No models given");
+  for (const model of models) {
+    try {
+      return { text: await callModel(model, system, user, settings), model };
+    } catch (err) {
+      if (!(err instanceof HttpError) || !shouldFallBack(err.status) || settings.signal?.aborted) throw err;
+      console.warn(`Falling back from ${model}:`, err.message);
+      lastError = err;
+    }
+  }
+  throw lastError;
 }
 
 /**
@@ -118,16 +165,18 @@ function isText(value: unknown): value is string {
 }
 
 /**
- * Ask one model to turn the idea into a finished version for the given purpose.
- * Returns the parsed JSON, or throws if the call fails or the JSON is bad.
+ * Ask a model to turn the idea into a finished version for the given purpose.
+ * `models` is tried in order (see callWithFallback).
+ * Returns the parsed JSON and the model that answered, or throws if every
+ * call fails or the JSON is bad.
  */
 export async function generateVersion(
-  model: string,
+  models: string[],
   systemPrompt: string,
   idea: string,
   purpose: Purpose,
   { style, maxTokens, signal }: CallOptions = {}
-): Promise<IdeaJSON> {
+): Promise<IdeaJSON & { model: string }> {
   const { guidance, fields } = PURPOSES[purpose];
 
   // Build the expected JSON shape from this purpose's fields, e.g.
@@ -140,7 +189,8 @@ export async function generateVersion(
   const styleLine = style ? `\n\n${style}` : "";
   const system = `${systemPrompt}\n\n${guidance}${styleLine}\n\nRespond with ONLY a JSON object, no markdown, no extra text, in exactly this shape:\n${shape}`;
 
-  const obj = extractJSON(await callModel(model, system, idea, { maxTokens, signal }));
+  const { text, model } = await callWithFallback(models, system, idea, { maxTokens, signal });
+  const obj = extractJSON(text);
 
   // Make sure every field exists and is a non-empty string.
   for (const key of ["title", "pitch", ...fields.map((f) => f.key)]) {
@@ -150,6 +200,7 @@ export async function generateVersion(
     title: obj.title,
     pitch: obj.pitch,
     details: Object.fromEntries(fields.map((f) => [f.key, obj[f.key]])),
+    model,
   };
 }
 
@@ -213,11 +264,12 @@ const SATURATION_LEVELS = ["Fresh", "Crowded", "Very saturated"] as const;
 /**
  * Send the original idea, every generated version and the search results
  * to a stronger model and get back Brainy's honest verdict.
+ * `models` is tried in order (see callWithFallback).
  * Pass `results = null` when no search source ran at all.
  * Throws if the reply is unusable.
  */
 export async function judgeIdea(
-  model: string,
+  models: string[],
   idea: string,
   purpose: Purpose,
   versions: Version[],
@@ -249,7 +301,15 @@ export async function judgeIdea(
 
   // Lower temperature: we want a careful judge, not a creative one.
   const system = [judgePrompt(searched), style].filter(Boolean).join(" ");
-  const obj = extractJSON(await callModel(model, system, user, { temperature: 0.4, timeoutMs: 60_000, maxTokens: 1800, signal }));
+  // The verdict JSON is usually 600-1,200 tokens; 2,000 leaves room for a
+  // free reasoning model's short thinking without reserving a huge budget.
+  const { text, model } = await callWithFallback(models, system, user, {
+    temperature: 0.4,
+    timeoutMs: 60_000,
+    maxTokens: 2000,
+    signal,
+  });
+  const obj = extractJSON(text);
 
   if (!SATURATION_LEVELS.includes(obj.saturation)) throw new Error("Bad saturation value");
   if (!isText(obj.saturationReason)) throw new Error('Missing "saturationReason"');

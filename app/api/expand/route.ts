@@ -10,7 +10,14 @@
 
 import { NextResponse } from "next/server";
 import { MAX_IDEA_LENGTH, RUNS_PER_IP_PER_DAY } from "@/lib/limits";
-import { generateVersion, judgeIdea, writeSearchQueries, type BrainyTake, type Version } from "@/lib/openrouter";
+import {
+  FREE_MODELS,
+  generateVersion,
+  judgeIdea,
+  writeSearchQueries,
+  type BrainyTake,
+  type Version,
+} from "@/lib/openrouter";
 import { PURPOSES, isPurpose, type Purpose } from "@/lib/purposes";
 import { checkUsage, consumeRun, getClientIp, type Usage } from "@/lib/ratelimit";
 import { runSearches, skipAll, type SearchReport, type SearchResult } from "@/lib/search";
@@ -20,6 +27,8 @@ import { LENGTHS, isLength, isTone, styleInstruction, type AnswerLength, type To
 // Longest this function may run on Vercel, in seconds. The Hobby (free) plan
 // allows up to 300. A normal run takes 20-60s; the worst case with every
 // timeout hit is about 95s (search chain + models in parallel, then the judge).
+// Model fallbacks don't change this much: they only kick in on quick failures
+// (402/429/5xx), never on a timeout.
 export const maxDuration = 120;
 
 // Always run fresh: remaining-run counts must never be cached.
@@ -41,7 +50,20 @@ const BASELINE_PROMPT =
 const QUERY_MODEL = "google/gemini-2.5-flash-lite";
 
 // One stronger model reads everything and gives "Brainy's Take".
-const JUDGE_MODEL = "anthropic/claude-sonnet-5.5";
+// Set JUDGE_MODEL to any OpenRouter model ID; defaults to a free one.
+const JUDGE_MODEL = process.env.JUDGE_MODEL?.trim() || FREE_MODELS[0];
+
+// The model to try first, then the free models if it's out of credits,
+// rate-limited or down. `offset` rotates where the free list starts, so
+// parallel calls don't all land on the same free model and hit its rate limit.
+function withFallbacks(model: string, offset = 0): string[] {
+  const free = FREE_MODELS.filter((m) => m !== model);
+  const start = offset % free.length;
+  return [model, ...free.slice(start), ...free.slice(0, start)];
+}
+
+// Shown for any server-side problem. Details go to the logs, never to visitors.
+const GENERIC_ERROR = "Something went wrong on our side. Please try again.";
 
 // Shared framing so every direction still produces a concrete, finished concept.
 const DIRECTION_PREFIX =
@@ -86,7 +108,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Please pick Startup, Hackathon or Research." }, { status: 400 });
   }
   if (!process.env.OPENROUTER_API_KEY) {
-    return NextResponse.json({ error: "Server is missing OPENROUTER_API_KEY." }, { status: 500 });
+    console.error("OPENROUTER_API_KEY is not set");
+    return NextResponse.json({ error: GENERIC_ERROR }, { status: 500 });
   }
 
   // Use up one of today's runs. Done after the checks above, so invalid
@@ -134,7 +157,7 @@ export async function POST(req: Request) {
         });
       } catch (err) {
         console.warn("Run failed:", err instanceof Error ? err.message : err);
-        send({ type: "error", error: "Something went wrong on our side. Please try again." });
+        send({ type: "error", error: GENERIC_ERROR });
       } finally {
         try {
           controller.close();
@@ -197,19 +220,20 @@ async function runAll({
     });
 
   // 3. Baseline call.
-  const baselinePromise = generateVersion(BASELINE_MODEL, BASELINE_PROMPT, idea, purpose, options).then(
+  const baselinePromise = generateVersion(withFallbacks(BASELINE_MODEL), BASELINE_PROMPT, idea, purpose, options).then(
     (result): Version => {
-      const version = { ...result, direction: "Baseline", model: BASELINE_MODEL };
+      const version = { ...result, direction: "Baseline" };
       send({ type: "baseline", version });
       return version;
     }
   );
 
   // 4. One call per direction for this purpose, rotating through the models (0,1,2,0,1,2,...).
+  // Each falls back through the free models if its own model fails.
   const directionPromises = PURPOSES[purpose].directions.map((d, i) => {
-    const model = MODELS[i % MODELS.length];
-    return generateVersion(model, DIRECTION_PREFIX + d.prompt, idea, purpose, options).then((result): Version => {
-      const version = { ...result, direction: d.label, model };
+    const models = withFallbacks(MODELS[i % MODELS.length], i + 1);
+    return generateVersion(models, DIRECTION_PREFIX + d.prompt, idea, purpose, options).then((result): Version => {
+      const version = { ...result, direction: d.label };
       send({ type: "version", version });
       return version;
     });
@@ -235,7 +259,8 @@ async function runAll({
   else console.warn("Baseline failed:", baselineResult.reason?.message ?? baselineResult.reason);
 
   if (!baseline && versions.length === 0) {
-    send({ type: "error", error: "All models failed. Check your API key and try again." });
+    console.warn("All models failed");
+    send({ type: "error", error: GENERIC_ERROR });
     return;
   }
 
@@ -246,7 +271,7 @@ async function runAll({
   try {
     const all = baseline ? [baseline, ...versions] : versions;
     const searched = search.report.ran.length > 0;
-    take = await judgeIdea(JUDGE_MODEL, idea, purpose, all, searched ? search.results : null, options);
+    take = await judgeIdea(withFallbacks(JUDGE_MODEL), idea, purpose, all, searched ? search.results : null, options);
   } catch (err) {
     console.warn("Judge failed:", err instanceof Error ? err.message : err);
   }
