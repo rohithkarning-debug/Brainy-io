@@ -23,7 +23,7 @@ export function PurposePicker({
         {/* The sliding pill */}
         <span
           aria-hidden
-          className={`absolute inset-y-1 left-1 w-[calc((100%-0.5rem)/3)] rounded-lg bg-white shadow-card ring-1 ring-slate-900/5 transition-transform duration-300 ease-out ${slide}`}
+          className={`absolute inset-y-1 left-1 w-[calc((100%-0.5rem)/3)] rounded-lg bg-surface shadow-card ring-1 ring-slate-900/5 transition-transform duration-300 ease-out ${slide}`}
         />
         {PURPOSE_KEYS.map((key) => {
           const active = key === value;

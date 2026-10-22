@@ -1,7 +1,12 @@
-import { Label } from "@/app/components/ui";
-import { hostname, sourceList } from "@/lib/format";
+"use client";
+
+import Link from "next/link";
+import { CopyShareButtons } from "@/app/components/CopyShare";
+import { TypeText } from "@/app/components/TypeText";
+import { Disclosure, Label, Tooltip } from "@/app/components/ui";
+import { hostname, sourceList, takeToText } from "@/lib/format";
 import type { BrainyTake, SimilarThing } from "@/lib/openrouter";
-import { SOURCE_LABELS } from "@/lib/purposes";
+import { SOURCE_LABELS, type Purpose } from "@/lib/purposes";
 import type { SearchReport } from "@/lib/search";
 
 // Colors for the saturation badge.
@@ -11,14 +16,37 @@ export const SATURATION_STYLES: Record<BrainyTake["saturation"], string> = {
   "Very saturated": "bg-rose-50 text-rose-700 ring-rose-600/20",
 };
 
+// What each saturation level means, shown in a tooltip on the badge.
+const SATURATION_HINTS: Record<BrainyTake["saturation"], string> = {
+  Fresh: "Few or no close matches found",
+  Crowded: "A few direct competitors already exist",
+  "Very saturated": "Many strong direct matches exist",
+};
+
+// Link that opens the Ask page with this idea filled in.
+function askLink(idea: string, purpose: Purpose) {
+  return `/ask?${new URLSearchParams({ idea, purpose })}`;
+}
+
 // The big highlighted verdict card at the top of the results.
-export function BrainyTakeCard({ take, search }: { take: BrainyTake; search: SearchReport }) {
+// `live` = it just arrived from a run, so the pick types itself out.
+export function BrainyTakeCard({
+  take,
+  search,
+  purpose,
+  live = false,
+}: {
+  take: BrainyTake;
+  search: SearchReport;
+  purpose: Purpose;
+  live?: boolean;
+}) {
   const searched = search.ran.length > 0;
 
   return (
     // Outer div is a 1px gradient "border" around the inner panel.
     <section className="rounded-3xl bg-gradient-to-br from-accent/70 via-fuchsia-400/50 to-orange-300/60 p-px shadow-hero">
-      <div className="rounded-[calc(1.5rem-1px)] bg-white p-6 sm:p-10">
+      <div className="rounded-[calc(1.5rem-1px)] bg-surface p-6 sm:p-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-accent">Brainy&apos;s Take</p>
@@ -26,7 +54,10 @@ export function BrainyTakeCard({ take, search }: { take: BrainyTake; search: Sea
               The verdict
             </h2>
           </div>
-          <span className="font-mono text-xs text-slate-400">judged by {take.model}</span>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xs text-slate-400">judged by {take.model}</span>
+            <CopyShareButtons title={`Brainy's pick: ${take.pick.title}`} text={takeToText(take)} />
+          </div>
         </div>
 
         <div className="mt-8 grid gap-8 lg:grid-cols-5 lg:gap-10">
@@ -34,17 +65,21 @@ export function BrainyTakeCard({ take, search }: { take: BrainyTake; search: Sea
           <div className="rounded-2xl bg-gradient-to-br from-accent/[0.07] via-fuchsia-500/[0.04] to-transparent p-6 ring-1 ring-accent/15 sm:p-8 lg:col-span-3">
             <div className="flex flex-wrap items-center gap-2">
               <Label>Brainy&apos;s pick</Label>
-              <span className="rounded-full bg-accent px-2.5 py-0.5 text-xs font-semibold text-white">
-                {take.pick.basedOn}
-              </span>
+              <Tooltip label="The direction this pick builds on">
+                <span tabIndex={0} className="rounded-full bg-accent px-2.5 py-0.5 text-xs font-semibold text-white">
+                  {take.pick.basedOn}
+                </span>
+              </Tooltip>
             </div>
             <h3 className="mt-4 text-2xl font-semibold leading-tight tracking-[-0.02em] text-slate-950 sm:text-3xl">
               {take.pick.title}
             </h3>
-            <p className="mt-3 text-lg leading-relaxed text-slate-700">{take.pick.pitch}</p>
+            <p className="mt-3 text-lg leading-relaxed text-slate-700">
+              <TypeText text={take.pick.pitch} animate={live} />
+            </p>
             {take.pick.why && (
               <p className="mt-5 border-l-2 border-accent pl-4 text-sm leading-relaxed text-slate-600">
-                {take.pick.why}
+                <TypeText text={take.pick.why} animate={live} />
               </p>
             )}
           </div>
@@ -52,28 +87,34 @@ export function BrainyTakeCard({ take, search }: { take: BrainyTake; search: Sea
           {/* Right: saturation verdict + similar things */}
           <div className="lg:col-span-2">
             <Label>Saturation</Label>
-            <span
-              className={`mt-2 inline-block rounded-full px-3.5 py-1 text-base font-semibold ring-1 ring-inset ${SATURATION_STYLES[take.saturation]}`}
-            >
-              {take.saturation}
-            </span>
+            <div className="mt-2">
+              <Tooltip label={SATURATION_HINTS[take.saturation]}>
+                <span
+                  tabIndex={0}
+                  className={`inline-block rounded-full px-3.5 py-1 text-base font-semibold ring-1 ring-inset ${SATURATION_STYLES[take.saturation]}`}
+                >
+                  {take.saturation}
+                </span>
+              </Tooltip>
+            </div>
             <p className="mt-3 leading-relaxed text-slate-700">{take.saturationReason}</p>
 
             <div className="mt-7">
-              <Label>Similar things that already exist</Label>
-              {take.similarExisting.length > 0 ? (
-                <ul className="mt-3 space-y-2">
-                  {take.similarExisting.map((thing) => (
-                    <SimilarItem key={thing.url ?? thing.title} thing={thing} />
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-2 text-sm text-slate-500">
-                  {searched
-                    ? "No close matches found in our search."
-                    : "None came to mind, but no live search ran, so check yourself."}
-                </p>
-              )}
+              <Disclosure summary={<Label>Similar things that already exist ({take.similarExisting.length})</Label>}>
+                {take.similarExisting.length > 0 ? (
+                  <ul className="mt-3 space-y-2">
+                    {take.similarExisting.map((thing) => (
+                      <SimilarItem key={thing.url ?? thing.title} thing={thing} />
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-sm text-slate-500">
+                    {searched
+                      ? "No close matches found in our search."
+                      : "None came to mind, but no live search ran, so check yourself."}
+                  </p>
+                )}
+              </Disclosure>
             </div>
           </div>
         </div>
@@ -84,13 +125,35 @@ export function BrainyTakeCard({ take, search }: { take: BrainyTake; search: Sea
             <Label>Less crowded ideas to try instead</Label>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               {take.alternatives.map((a) => (
-                <div
+                <Link
                   key={a.title}
-                  className="rounded-xl border border-line bg-white p-5 shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-lift"
+                  href={askLink(`${a.title}: ${a.pitch}`, purpose)}
+                  className="group rounded-xl border border-line bg-surface p-5 shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-lift"
                 >
-                  <h4 className="font-semibold tracking-tight text-slate-950">{a.title}</h4>
+                  <h4 className="font-semibold tracking-tight text-slate-950 group-hover:text-accent">{a.title}</h4>
                   <p className="mt-1 text-sm leading-relaxed text-slate-600">{a.pitch}</p>
-                </div>
+                  <p className="mt-3 text-xs font-semibold text-accent">
+                    Expand this one <span aria-hidden>→</span>
+                  </p>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Follow-ups: one click puts the idea in the Ask box */}
+        {take.followUps?.length > 0 && (
+          <div className="mt-10 border-t border-line pt-8">
+            <Label>Keep cooking</Label>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {take.followUps.map((f) => (
+                <Link
+                  key={f}
+                  href={askLink(f, purpose)}
+                  className="rounded-full border border-accent/20 bg-accent/[0.06] px-3.5 py-1.5 text-left text-sm text-slate-700 transition hover:border-accent/40 hover:bg-accent/10 hover:text-slate-950"
+                >
+                  {f} <span aria-hidden className="text-accent">→</span>
+                </Link>
               ))}
             </div>
           </div>

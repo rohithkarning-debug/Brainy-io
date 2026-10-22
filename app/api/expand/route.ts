@@ -1,6 +1,9 @@
 // POST /api/expand
-// Body: { "idea": "...", "purpose": "startup" | "hackathon" | "research" }
-// Returns: { baseline: Version | null, versions: Version[], take: BrainyTake | null, search: SearchReport, remaining: number | null }
+// Body: { "idea": "...", "purpose": "startup" | "hackathon" | "research",
+//         "length"?: "short" | "medium" | "detailed", "tone"?: "simple" | "technical" | "fun" }
+// Bad input or a hit limit: a plain JSON error ({ error, limitReached?, remaining? }).
+// Otherwise: a stream of StreamEvent lines (see lib/stream.ts), each sent as soon
+// as that piece finishes: start -> search / baseline / version (any order) -> take -> done.
 //
 // GET /api/expand
 // Returns: { remaining: number | null } (runs this visitor has left today; null = no limits)
@@ -8,9 +11,11 @@
 import { NextResponse } from "next/server";
 import { MAX_IDEA_LENGTH, RUNS_PER_IP_PER_DAY } from "@/lib/limits";
 import { generateVersion, judgeIdea, writeSearchQueries, type BrainyTake, type Version } from "@/lib/openrouter";
-import { PURPOSES, isPurpose } from "@/lib/purposes";
+import { PURPOSES, isPurpose, type Purpose } from "@/lib/purposes";
 import { checkUsage, consumeRun, getClientIp, type Usage } from "@/lib/ratelimit";
 import { runSearches, skipAll, type SearchReport, type SearchResult } from "@/lib/search";
+import { STREAM_CONTENT_TYPE, type StreamEvent } from "@/lib/stream";
+import { LENGTHS, isLength, isTone, styleInstruction, type AnswerLength, type Tone } from "@/lib/style";
 
 // Longest this function may run on Vercel, in seconds. The Hobby (free) plan
 // allows up to 300. A normal run takes 20-60s; the worst case with every
@@ -64,10 +69,13 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  // 1. Read and check the user's idea and purpose.
+  // 1. Read and check the user's idea, purpose and style settings.
   const body = await req.json().catch(() => null);
   const idea = typeof body?.idea === "string" ? body.idea.trim() : "";
   const purpose = body?.purpose;
+  // Style settings are optional: fall back to the defaults rather than refuse.
+  const length: AnswerLength = isLength(body?.length) ? body.length : "medium";
+  const tone: Tone = isTone(body?.tone) ? body.tone : "simple";
   if (!idea) {
     return NextResponse.json({ error: "Please enter an idea." }, { status: 400 });
   }
@@ -97,6 +105,77 @@ export async function POST(req: Request) {
     );
   }
 
+  // Aborted when the visitor presses Stop or closes the tab. It cancels every
+  // model call still running, so we stop paying for them.
+  const cancel = new AbortController();
+  req.signal.addEventListener("abort", () => cancel.abort());
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (event: StreamEvent) => {
+        if (cancel.signal.aborted) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+        } catch {
+          // The visitor left mid-write; nothing to do.
+        }
+      };
+
+      try {
+        send({ type: "start", remaining: usage.remaining });
+        await runAll({
+          idea,
+          purpose,
+          style: styleInstruction(length, tone),
+          maxTokens: LENGTHS[length].maxTokens,
+          signal: cancel.signal,
+          send,
+        });
+      } catch (err) {
+        console.warn("Run failed:", err instanceof Error ? err.message : err);
+        send({ type: "error", error: "Something went wrong on our side. Please try again." });
+      } finally {
+        try {
+          controller.close();
+        } catch {
+          // Already closed because the visitor cancelled.
+        }
+      }
+    },
+    cancel() {
+      cancel.abort();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": `${STREAM_CONTENT_TYPE}; charset=utf-8`,
+      // Ask every proxy along the way to pass lines through immediately.
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+// The whole run. Each piece is sent the moment it finishes.
+async function runAll({
+  idea,
+  purpose,
+  style,
+  maxTokens,
+  signal,
+  send,
+}: {
+  idea: string;
+  purpose: Purpose;
+  style: string;
+  maxTokens: number;
+  signal: AbortSignal;
+  send: (event: StreamEvent) => void;
+}) {
+  const options = { style, maxTokens, signal };
+
   // 2. Search for similar existing work. This chain (write queries -> search)
   // runs at the same time as the idea generation below, so it adds little wait.
   // It never throws: if anything fails we just get fewer (or no) results.
@@ -104,25 +183,36 @@ export async function POST(req: Request) {
   const searchPromise: Promise<{ results: SearchResult[]; report: SearchReport }> = writeSearchQueries(
     QUERY_MODEL,
     idea,
-    purpose
+    purpose,
+    signal
   )
     .then((queries) => runSearches(sources, queries))
     .catch((err) => {
       console.warn("Could not write search queries:", err instanceof Error ? err.message : err);
       return { results: [], report: skipAll(sources, "couldn't write search queries") };
+    })
+    .then((search) => {
+      send({ type: "search", search: search.report });
+      return search;
     });
 
   // 3. Baseline call.
-  const baselinePromise = generateVersion(BASELINE_MODEL, BASELINE_PROMPT, idea, purpose).then(
-    (result): Version => ({ ...result, direction: "Baseline", model: BASELINE_MODEL })
+  const baselinePromise = generateVersion(BASELINE_MODEL, BASELINE_PROMPT, idea, purpose, options).then(
+    (result): Version => {
+      const version = { ...result, direction: "Baseline", model: BASELINE_MODEL };
+      send({ type: "baseline", version });
+      return version;
+    }
   );
 
   // 4. One call per direction for this purpose, rotating through the models (0,1,2,0,1,2,...).
   const directionPromises = PURPOSES[purpose].directions.map((d, i) => {
     const model = MODELS[i % MODELS.length];
-    return generateVersion(model, DIRECTION_PREFIX + d.prompt, idea, purpose).then(
-      (result): Version => ({ ...result, direction: d.label, model })
-    );
+    return generateVersion(model, DIRECTION_PREFIX + d.prompt, idea, purpose, options).then((result): Version => {
+      const version = { ...result, direction: d.label, model };
+      send({ type: "version", version });
+      return version;
+    });
   });
 
   // Promise.allSettled waits for ALL calls and never throws,
@@ -131,6 +221,7 @@ export async function POST(req: Request) {
     searchPromise,
     Promise.allSettled([baselinePromise, ...directionPromises]),
   ]);
+  if (signal.aborted) return;
 
   // 5. Keep only the calls that succeeded; log the failures for debugging.
   const versions: Version[] = [];
@@ -144,20 +235,21 @@ export async function POST(req: Request) {
   else console.warn("Baseline failed:", baselineResult.reason?.message ?? baselineResult.reason);
 
   if (!baseline && versions.length === 0) {
-    return NextResponse.json({ error: "All models failed. Check your API key and try again." }, { status: 502 });
+    send({ type: "error", error: "All models failed. Check your API key and try again." });
+    return;
   }
 
   // 6. Brainy's Take: the judge sees the idea, every version (baseline included)
   // and the search results. `null` tells it no search ran, so it falls back to
-  // its own knowledge. If the judge fails we still return the versions.
+  // its own knowledge. If the judge fails we still keep the versions.
   let take: BrainyTake | null = null;
   try {
     const all = baseline ? [baseline, ...versions] : versions;
     const searched = search.report.ran.length > 0;
-    take = await judgeIdea(JUDGE_MODEL, idea, purpose, all, searched ? search.results : null);
+    take = await judgeIdea(JUDGE_MODEL, idea, purpose, all, searched ? search.results : null, options);
   } catch (err) {
     console.warn("Judge failed:", err instanceof Error ? err.message : err);
   }
-
-  return NextResponse.json({ baseline, versions, take, search: search.report, remaining: usage.remaining });
+  send({ type: "take", take });
+  send({ type: "done" });
 }

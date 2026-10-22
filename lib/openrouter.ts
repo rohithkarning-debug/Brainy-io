@@ -39,7 +39,15 @@ export type BrainyTake = {
     why: string; // why this is the most unique-but-workable option
   };
   alternatives: { title: string; pitch: string }[]; // only when crowded/saturated
+  followUps: string[]; // short ideas the user could run through Brainy next
   model: string;
+};
+
+// Per-run options passed down from the API route.
+export type CallOptions = {
+  style?: string; // writing style line from lib/style.ts
+  maxTokens?: number;
+  signal?: AbortSignal; // aborted when the visitor presses Stop or leaves
 };
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -52,7 +60,12 @@ async function callModel(
   model: string,
   system: string,
   user: string,
-  { temperature = 0.9, timeoutMs = 30_000, maxTokens = 800 } = {}
+  {
+    temperature = 0.9,
+    timeoutMs = 30_000,
+    maxTokens = 800,
+    signal,
+  }: { temperature?: number; timeoutMs?: number; maxTokens?: number; signal?: AbortSignal } = {}
 ): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
@@ -75,8 +88,9 @@ async function callModel(
       // output limit up front, which can fail on low-credit keys.
       max_tokens: maxTokens,
     }),
-    // Give up on a slow model instead of hanging forever.
-    signal: AbortSignal.timeout(timeoutMs),
+    // Give up on a slow model instead of hanging forever, and stop paying
+    // for the call as soon as the visitor cancels.
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
   });
 
   if (!res.ok) {
@@ -111,7 +125,8 @@ export async function generateVersion(
   model: string,
   systemPrompt: string,
   idea: string,
-  purpose: Purpose
+  purpose: Purpose,
+  { style, maxTokens, signal }: CallOptions = {}
 ): Promise<IdeaJSON> {
   const { guidance, fields } = PURPOSES[purpose];
 
@@ -122,9 +137,10 @@ export async function generateVersion(
     pitch: "one sentence",
     ...Object.fromEntries(fields.map((f) => [f.key, f.hint])),
   });
-  const system = `${systemPrompt}\n\n${guidance}\n\nRespond with ONLY a JSON object, no markdown, no extra text, in exactly this shape:\n${shape}`;
+  const styleLine = style ? `\n\n${style}` : "";
+  const system = `${systemPrompt}\n\n${guidance}${styleLine}\n\nRespond with ONLY a JSON object, no markdown, no extra text, in exactly this shape:\n${shape}`;
 
-  const obj = extractJSON(await callModel(model, system, idea));
+  const obj = extractJSON(await callModel(model, system, idea, { maxTokens, signal }));
 
   // Make sure every field exists and is a non-empty string.
   for (const key of ["title", "pitch", ...fields.map((f) => f.key)]) {
@@ -152,10 +168,15 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
  * Ask a cheap model to turn the idea into good search queries.
  * Throws if the reply is unusable.
  */
-export async function writeSearchQueries(model: string, idea: string, purpose: Purpose): Promise<SearchQueries> {
+export async function writeSearchQueries(
+  model: string,
+  idea: string,
+  purpose: Purpose,
+  signal?: AbortSignal
+): Promise<SearchQueries> {
   const { label, searchHint } = PURPOSES[purpose];
   const user = `Purpose: ${label}. Look for: ${searchHint}.\n\nIdea:\n${idea}`;
-  const obj = extractJSON(await callModel(model, QUERY_PROMPT, user, { temperature: 0.3, timeoutMs: 15_000, maxTokens: 300 }));
+  const obj = extractJSON(await callModel(model, QUERY_PROMPT, user, { temperature: 0.3, timeoutMs: 15_000, maxTokens: 300, signal }));
 
   const clean = (list: unknown, max: number) =>
     Array.isArray(list) ? list.filter(isText).map((q) => q.trim().slice(0, 200)).slice(0, max) : [];
@@ -176,14 +197,15 @@ function judgePrompt(searched: boolean) {
 
   return `You are Brainy, a brutally honest judge of ideas. You will get a user's original idea, what it is for, several AI-generated versions of it${searched ? ", and numbered results from a live search for similar existing work" : ""}.
 
-Do four things:
+Do five things:
 ${similarStep}
 2. Saturation: judge how crowded this space already is. Pick exactly one of "Fresh", "Crowded", "Very saturated". ${saturationBasis} Give a one-line reason. Never call the idea "unique".
 3. Brainy's pick: choose the single most unique-but-still-workable direction. Either take one of the versions and improve it, or propose a new angle none of them found. Say which version it is based on (its direction label) or "New angle".
 4. If saturation is "Crowded" or "Very saturated", suggest 1-2 related but less crowded ideas to try instead. If "Fresh", return an empty list.
+5. Follow-ups: write 3 short ideas (one sentence, under 20 words each) the user could run through Brainy next, e.g. a sharper niche of your pick, a pivot, or a risky twist. Write them as ideas, not questions to the user.
 
 Respond with ONLY a JSON object, no markdown, no extra text, in exactly this shape:
-{"similarExisting": ${similarShape}, "saturation": "Fresh" | "Crowded" | "Very saturated", "saturationReason": "one line", "pick": {"title": "...", "pitch": "one or two sentences", "basedOn": "direction label or New angle", "why": "one or two sentences"}, "alternatives": [{"title": "...", "pitch": "one sentence"}]}`;
+{"similarExisting": ${similarShape}, "saturation": "Fresh" | "Crowded" | "Very saturated", "saturationReason": "one line", "pick": {"title": "...", "pitch": "one or two sentences", "basedOn": "direction label or New angle", "why": "one or two sentences"}, "alternatives": [{"title": "...", "pitch": "one sentence"}], "followUps": ["...", "...", "..."]}`;
 }
 
 const SATURATION_LEVELS = ["Fresh", "Crowded", "Very saturated"] as const;
@@ -199,7 +221,8 @@ export async function judgeIdea(
   idea: string,
   purpose: Purpose,
   versions: Version[],
-  results: SearchResult[] | null
+  results: SearchResult[] | null,
+  { style, signal }: CallOptions = {}
 ): Promise<BrainyTake> {
   const { label, fields } = PURPOSES[purpose];
 
@@ -225,7 +248,8 @@ export async function judgeIdea(
   const user = `Purpose: ${label}\n\nOriginal idea:\n${idea}\n\nGenerated versions:\n${versionsText}${resultsText}`;
 
   // Lower temperature: we want a careful judge, not a creative one.
-  const obj = extractJSON(await callModel(model, judgePrompt(searched), user, { temperature: 0.4, timeoutMs: 60_000, maxTokens: 1500 }));
+  const system = [judgePrompt(searched), style].filter(Boolean).join(" ");
+  const obj = extractJSON(await callModel(model, system, user, { temperature: 0.4, timeoutMs: 60_000, maxTokens: 1800, signal }));
 
   if (!SATURATION_LEVELS.includes(obj.saturation)) throw new Error("Bad saturation value");
   if (!isText(obj.saturationReason)) throw new Error('Missing "saturationReason"');
@@ -246,6 +270,10 @@ export async function judgeIdea(
       obj.saturation === "Fresh" || !Array.isArray(obj.alternatives)
         ? []
         : obj.alternatives.filter((a: { title?: unknown; pitch?: unknown }) => isText(a?.title) && isText(a?.pitch)).slice(0, 2),
+    // Capped so a click can drop one straight into the idea box.
+    followUps: Array.isArray(obj.followUps)
+      ? obj.followUps.filter(isText).map((f: string) => f.trim().slice(0, 300)).slice(0, 3)
+      : [],
     model,
   };
 }

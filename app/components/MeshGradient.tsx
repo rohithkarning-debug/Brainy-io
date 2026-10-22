@@ -3,7 +3,7 @@ export function MeshGradient() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[780px] [mask-image:linear-gradient(to_bottom,black_45%,transparent)]"
+      className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[780px] dark:opacity-40 [mask-image:linear-gradient(to_bottom,black_45%,transparent)]"
     >
       <div className="animate-drift-a absolute -left-[10%] -top-[20%] h-[520px] w-[620px] rounded-full bg-violet-400/50 blur-[100px]" />
       <div className="animate-drift-b absolute right-[-5%] -top-[15%] h-[480px] w-[560px] rounded-full bg-sky-400/45 blur-[100px]" />

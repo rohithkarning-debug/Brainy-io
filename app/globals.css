@@ -1,11 +1,19 @@
 ﻿@import "tailwindcss";
 
-/* Brainy's light theme: off-white canvas, crisp slate text, one indigo-violet accent. */
-@theme inline {
+/* Dark mode follows a `dark` class on <html>, set from Settings (see app/layout.tsx). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Brainy's light theme: off-white canvas, crisp slate text, one indigo-violet accent.
+   Not `inline`, so the dark theme below can swap these values at runtime. */
+@theme {
   --color-canvas: #f7f8fb; /* page background */
+  --color-surface: #ffffff; /* cards and panels */
   --color-line: #e4e7ee; /* card borders */
   --color-accent: #5b47e6; /* the Brainy indigo */
   --color-accent-dark: #4934d1; /* button hover */
+}
+
+@theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 
@@ -15,14 +23,60 @@
   --shadow-hero: 0 4px 8px rgb(15 23 42 / 0.04), 0 40px 80px -24px rgb(70 50 180 / 0.28);
 }
 
-html {
-  color-scheme: light;
+/* Dark theme: a deep ink canvas. The slate scale is flipped (950 = lightest),
+   so every `text-slate-*` / `bg-slate-*` class keeps its role without dark: variants. */
+.dark {
+  --color-canvas: #0b0d17;
+  --color-surface: #141726;
+  --color-line: #262b40;
+  --color-accent: #6e5df2;
+  --color-accent-dark: #5b47e6;
+
+  --color-slate-50: #171a2b;
+  --color-slate-100: #1d2134;
+  --color-slate-200: #2a2f46;
+  --color-slate-300: #3a405b;
+  --color-slate-400: #7b829c;
+  --color-slate-500: #939ab2;
+  --color-slate-600: #adb3c7;
+  --color-slate-700: #c6cbda;
+  --color-slate-800: #dce0ea;
+  --color-slate-900: #eceef5;
+  --color-slate-950: #f6f7fb;
+
+  /* Status tints: dark backgrounds, light text. */
+  --color-emerald-50: #0f2a22;
+  --color-emerald-700: #6ee7b7;
+  --color-amber-50: #2b2110;
+  --color-amber-200: #5c4618;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+  --color-rose-50: #2e1219;
+  --color-rose-200: #5f2330;
+  --color-rose-700: #fda4af;
+}
+
+/* Font size from Settings: everything is in rem, so this scales the whole UI. */
+html[data-font="sm"] {
+  font-size: 15px;
+}
+html[data-font="lg"] {
+  font-size: 18px;
 }
 
 body {
   background: var(--color-canvas);
-  color: #0f172a;
+  color: var(--color-slate-900);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/* One consistent keyboard focus ring. In the base layer, so utilities can override it. */
+@layer base {
+  :where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 0.5rem;
+  }
 }
 
 /* Hero mesh: four blurred color blobs drifting slowly around each other. */
@@ -57,6 +111,11 @@ body {
   animation: rise-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
+/* Page change: a quicker, smaller rise. */
+.animate-page-in {
+  animation: rise-in 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
 /* Loading bar: an accent streak sweeping left to right. */
 @keyframes sweep {
   from {
@@ -70,12 +129,71 @@ body {
   animation: sweep 1.4s ease-in-out infinite;
 }
 
+/* Cooking lines: fade in, hold, fade out, timed to the 1.5s rotation. */
+@keyframes fade-swap {
+  0% { opacity: 0; transform: translateY(6px); }
+  18%, 82% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-6px); }
+}
+.animate-fade-swap {
+  animation: fade-swap 1.5s ease-in-out both;
+}
+
+/* Three bouncing dots after the cooking line. */
+@keyframes dot {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+.animate-dot {
+  animation: dot 1.2s ease-in-out infinite;
+}
+
+/* Skeleton shimmer: a soft highlight sliding across a placeholder bar. */
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-slate-100) 25%,
+    var(--color-slate-200) 50%,
+    var(--color-slate-100) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* Blinking caret at the end of text that is still "typing". */
+@keyframes blink {
+  50% { opacity: 0; }
+}
+.typing-caret {
+  display: inline-block;
+  width: 0.5ch;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: -0.12em;
+  background: currentColor;
+  animation: blink 0.9s steps(1) infinite;
+}
+
+/* Less motion: asked for by the OS, or turned off in Settings. */
 @media (prefers-reduced-motion: reduce) {
-  .animate-drift-a,
-  .animate-drift-b,
-  .animate-drift-c,
-  .animate-rise-in,
-  .animate-sweep {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
+}
+html[data-motion="off"] *,
+html[data-motion="off"] *::before,
+html[data-motion="off"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
 }
