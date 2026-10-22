@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { IDEA_INPUT_ID } from "@/app/components/Nav";
 import { PurposePicker } from "@/app/components/PurposePicker";
+import { RunsBadge } from "@/app/components/RunsBadge";
 import { Kbd, Label } from "@/app/components/ui";
 import { formatDate } from "@/lib/format";
 import { useHistory } from "@/lib/history";
+import { useKeys } from "@/lib/keys";
 import { MAX_IDEA_LENGTH, RUNS_PER_USER_PER_DAY } from "@/lib/limits";
 import { PURPOSES, type Purpose } from "@/lib/purposes";
-import { refreshRemaining, startRun, useRemaining } from "@/lib/run";
+import { refreshRemaining, startRun, useFuelOut, useRemaining } from "@/lib/run";
 import { useSettings } from "@/lib/settings";
 import { LENGTHS, TONES } from "@/lib/style";
 
@@ -38,6 +40,8 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
   const [idea, setIdea] = useState(initialIdea);
   const [purpose, setPurpose] = useState<Purpose>(initialPurpose);
   const remaining = useRemaining();
+  const fuelOut = useFuelOut();
+  const ownKey = Boolean(useKeys().openrouter);
   const history = useHistory();
   const settings = useSettings();
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -49,7 +53,9 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
     if (matchMedia("(pointer: fine)").matches) inputRef.current?.focus();
   }, []);
 
-  const canSend = idea.trim() !== "" && remaining !== 0;
+  // Out of free runs (or free fuel) only blocks visitors without their own key.
+  const blocked = !ownKey && (remaining === 0 || fuelOut);
+  const canSend = idea.trim() !== "" && !blocked;
 
   function send() {
     if (!canSend) return;
@@ -128,11 +134,7 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
             </span>
           </p>
           <div className="flex items-center gap-3">
-            {typeof remaining === "number" && (
-              <span className="text-xs tabular-nums text-slate-400">
-                {remaining} of {RUNS_PER_USER_PER_DAY} free runs left today
-              </span>
-            )}
+            <RunsBadge />
             <button
               type="submit"
               disabled={!canSend}
@@ -147,9 +149,15 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
         </div>
       </form>
 
-      {remaining === 0 && (
+      {blocked && (
         <p className="mt-6 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">
-          You&apos;ve used your {RUNS_PER_USER_PER_DAY} free runs today, come back tomorrow! Your{" "}
+          {fuelOut
+            ? "Brainy's free fuel is out for today."
+            : `You've used your ${RUNS_PER_USER_PER_DAY} free runs today.`}{" "}
+          <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
+            Add your own free OpenRouter key to keep going <span aria-hidden>→</span>
+          </Link>{" "}
+          Your{" "}
           <Link href="/history" className="font-medium underline underline-offset-2">
             history
           </Link>{" "}

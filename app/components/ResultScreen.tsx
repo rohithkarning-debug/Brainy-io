@@ -11,6 +11,7 @@ import { ActionButton, SectionTitle, TabPanel, Tabs } from "@/app/components/ui"
 import { VersionCard } from "@/app/components/VersionCard";
 import { formatDate, resultToText, sourceList } from "@/lib/format";
 import { togglePin, useHistory, type Result } from "@/lib/history";
+import { useKeys } from "@/lib/keys";
 import { PURPOSES } from "@/lib/purposes";
 import { startRun, stopRun, useRun } from "@/lib/run";
 import { setCooked } from "@/lib/reveal";
@@ -52,6 +53,7 @@ export function ResultView({
   const toast = useToast();
   const { copy, share } = useCopyShare();
   const settings = useSettings();
+  const hasOwnKey = Boolean(useKeys().openrouter);
   const [tab, setTab] = useState<Tab>("verdict");
   const [detailsOpen, setDetailsOpen] = useState(true);
 
@@ -159,7 +161,8 @@ export function ResultView({
             Stop generating
           </ActionButton>
         ) : (
-          !result.limited && !result.outOfJuice && (
+          // A hit limit or empty fuel tank can't be retried, unless they've since added their own key.
+          (hasOwnKey || (!result.limited && !result.outOfJuice)) && (
             <ActionButton icon="refresh" onClick={regenerate}>
               Regenerate
             </ActionButton>
@@ -186,8 +189,15 @@ export function ResultView({
       </div>
 
       {/* ---------- Notes: limit, out of juice, error, stopped ---------- */}
-      {result.limited ? (
-        <p className="mt-8 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">{result.error}</p>
+      {result.limited || result.keyProblem ? (
+        <p className="mt-8 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">
+          {result.error}{" "}
+          {(result.keyProblem || !hasOwnKey) && (
+            <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
+              {result.keyProblem ? "Open Settings" : "Add a key in Settings"} <span aria-hidden>→</span>
+            </Link>
+          )}
+        </p>
       ) : result.outOfJuice ? (
         <OutOfJuice />
       ) : result.status === "error" ? (
@@ -305,22 +315,33 @@ export function ResultView({
   );
 }
 
-// Every model was out of credits or rate-limited: nothing to retry until tomorrow.
+// The server key's free fuel is out for today (daily pool used up, or every
+// model out of credits). The way forward is the visitor's own key.
 function OutOfJuice() {
   return (
     <div role="status" className="mt-8 max-w-3xl rounded-2xl border border-line bg-surface p-6 shadow-card sm:p-8">
       <p aria-hidden className="text-4xl">🪫</p>
-      <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Brainy&apos;s out of juice for today</h2>
+      <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-950">
+        Brainy&apos;s free fuel is out for today
+      </h2>
       <p className="mt-2 leading-relaxed text-slate-600">
-        The AI models behind Brainy have used up today&apos;s allowance. Try again tomorrow, your idea will still be
-        half-baked and waiting.
+        Everyone&apos;s free runs share one daily tank, and it&apos;s empty. Add your own free OpenRouter key to keep
+        going. It stays in this browser and your runs on it don&apos;t touch the free limit.
       </p>
-      <Link
-        href="/"
-        className="mt-6 inline-flex rounded-full border border-slate-950 bg-surface px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-card transition hover:bg-slate-50"
-      >
-        Back home
-      </Link>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <Link
+          href="/settings#api-keys"
+          className="inline-flex items-center gap-1.5 rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-on-accent shadow-card transition hover:bg-accent-dark"
+        >
+          Add your own free OpenRouter key <span aria-hidden>→</span>
+        </Link>
+        <Link
+          href="/"
+          className="inline-flex rounded-full border border-slate-950 bg-surface px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-card transition hover:bg-slate-50"
+        >
+          Back home
+        </Link>
+      </div>
     </div>
   );
 }

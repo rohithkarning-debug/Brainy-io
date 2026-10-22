@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { ApiKeys } from "@/app/components/ApiKeys";
 import { useToast } from "@/app/components/Toast";
 import { resetSettings, updateSettings, useSettings, type FontSize, type Settings, type Theme } from "@/lib/settings";
 import { LENGTHS, LENGTH_KEYS, TONES, TONE_KEYS } from "@/lib/style";
@@ -70,6 +71,8 @@ export function SettingsScreen() {
           />
         </button>
       </Row>
+
+      <ApiKeys />
 
       <div className="pt-4">
         <button

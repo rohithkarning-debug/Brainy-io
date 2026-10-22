@@ -1,29 +1,31 @@
 // POST /api/expand
 // Body: { "idea": "...", "purpose": "startup" | "hackathon" | "research",
 //         "length"?: "short" | "medium" | "detailed", "tone"?: "simple" | "technical" | "fun" }
-// Bad input or a hit limit: a plain JSON error ({ error, limitReached?, remaining? }).
+// Optional headers: x-user-openrouter-key / x-user-tavily-key, the visitor's own
+// keys (see lib/key-format.ts). Used for this request only, never stored or logged.
+// Bad input or a hit limit: a plain JSON error ({ error, limitReached?, fuelOut?, keyProblem?, remaining? }).
 // Otherwise: a stream of StreamEvent lines (see lib/stream.ts), each sent as soon
 // as that piece finishes: start -> search / baseline / version (any order) -> take -> done.
 //
 // Signed out: 401 with { error }. Never trust the page to check this.
 //
 // GET /api/expand
-// Returns: { remaining: number | null } (runs this user has left today; null = no limits or signed out)
+// Returns: { remaining: number | null, fuelOut: boolean } (free runs this user has left
+// today, null = no limits or signed out; fuelOut = the server key's daily pool is used up)
 
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
-import { MAX_IDEA_LENGTH, RUNS_PER_USER_PER_DAY } from "@/lib/limits";
+import { MAX_IDEA_LENGTH } from "@/lib/limits";
 import {
-  FREE_MODELS,
   generateVersion,
-  isQuotaError,
   judgeIdea,
   writeSearchQueries,
   type BrainyTake,
   type Version,
 } from "@/lib/openrouter";
 import { PURPOSES, isPurpose, type Purpose } from "@/lib/purposes";
-import { checkUsage, consumeRun, getClientIp, type Usage, type Visitor } from "@/lib/ratelimit";
+import { checkUsage } from "@/lib/ratelimit";
+import { JUDGE_MODEL, withFallbacks } from "@/lib/server/models";
+import { GENERIC_ERROR, explainFailure, getVisitor, identify, takeRun, type UserKeys } from "@/lib/server/guard";
 import { runSearches, skipAll, type SearchReport, type SearchResult } from "@/lib/search";
 import { STREAM_CONTENT_TYPE, type StreamEvent } from "@/lib/stream";
 import { LENGTHS, isLength, isTone, styleInstruction, type AnswerLength, type Tone } from "@/lib/style";
@@ -53,65 +55,26 @@ const BASELINE_PROMPT =
 // A fast, cheap model writes the search queries.
 const QUERY_MODEL = "google/gemini-2.5-flash-lite";
 
-// One stronger model reads everything and gives "Brainy's Take".
-// Set JUDGE_MODEL to any OpenRouter model ID; defaults to a free one.
-const JUDGE_MODEL = process.env.JUDGE_MODEL?.trim() || FREE_MODELS[0];
-
-// The model to try first, then the free models if it's out of credits,
-// rate-limited or down. `offset` rotates where the free list starts, so
-// parallel calls don't all land on the same free model and hit its rate limit.
-function withFallbacks(model: string, offset = 0): string[] {
-  const free = FREE_MODELS.filter((m) => m !== model);
-  const start = offset % free.length;
-  return [model, ...free.slice(start), ...free.slice(0, start)];
-}
-
-// Shown for any server-side problem. Details go to the logs, never to visitors.
-const GENERIC_ERROR = "Something went wrong on our side. Please try again.";
-
-// Shown when every model is out of credits or rate-limited.
-const OUT_OF_JUICE = "Brainy's out of juice for today, try again tomorrow.";
-
 // Shared framing so every direction still produces a concrete, finished concept.
 const DIRECTION_PREFIX =
   "You are a creative strategist. Turn the user's half-baked idea into a specific, finished concept. Constraint: ";
 
-// Friendly message for each limit (shown as-is in the UI).
-function limitMessage(blockedBy: "user" | "ip" | "global") {
-  if (blockedBy === "user") return `You've used your ${RUNS_PER_USER_PER_DAY} free runs today, come back tomorrow!`;
-  if (blockedBy === "ip") return "Too many runs from this network today. Come back tomorrow!";
-  return "Brainy has hit its daily limit for everyone. Come back tomorrow!";
-}
-
-// The signed-in user and their IP, or null when signed out.
-async function getVisitor(req: Request): Promise<Visitor | null> {
-  const session = await auth();
-  const userId = session?.user?.id;
-  return userId ? { userId, ip: getClientIp(req) } : null;
-}
-
-// Shown if Redis is configured but can't be reached. We refuse the run
-// rather than risk unlimited use of the API credits.
-const LIMITS_DOWN = "Brainy can't check usage limits right now. Please try again in a minute.";
-
 export async function GET(req: Request) {
   try {
     const visitor = await getVisitor(req);
-    if (!visitor) return NextResponse.json({ remaining: null });
+    if (!visitor) return NextResponse.json({ remaining: null, fuelOut: false });
     const usage = await checkUsage(visitor);
-    return NextResponse.json({ remaining: usage.remaining });
+    return NextResponse.json({ remaining: usage.remaining, fuelOut: usage.blockedBy === "global" });
   } catch (err) {
     console.warn("Usage check failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json({ remaining: null });
+    return NextResponse.json({ remaining: null, fuelOut: false });
   }
 }
 
 export async function POST(req: Request) {
-  // 0. Only signed-in users can run Brainy.
-  const visitor = await getVisitor(req);
-  if (!visitor) {
-    return NextResponse.json({ error: "Please sign in to cook an idea." }, { status: 401 });
-  }
+  // 0. Only signed-in users can run Brainy. Also reads (and format-checks) their own keys.
+  const caller = await identify(req);
+  if (caller instanceof NextResponse) return caller;
 
   // 1. Read and check the user's idea, purpose and style settings.
   const body = await req.json().catch(() => null);
@@ -129,26 +92,10 @@ export async function POST(req: Request) {
   if (!isPurpose(purpose)) {
     return NextResponse.json({ error: "Please pick Startup, Hackathon or Research." }, { status: 400 });
   }
-  if (!process.env.OPENROUTER_API_KEY) {
-    console.error("OPENROUTER_API_KEY is not set");
-    return NextResponse.json({ error: GENERIC_ERROR }, { status: 500 });
-  }
-
-  // Use up one of today's runs. Done after the checks above, so invalid
-  // requests don't count. `limitReached` tells the UI to show a friendly note.
-  let usage: Usage;
-  try {
-    usage = await consumeRun(visitor);
-  } catch (err) {
-    console.warn("Usage limit check failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: LIMITS_DOWN }, { status: 503 });
-  }
-  if (usage.blockedBy) {
-    return NextResponse.json(
-      { error: limitMessage(usage.blockedBy), limitReached: true, remaining: usage.remaining },
-      { status: 429 }
-    );
-  }
+  // Use up one of today's runs (or one on their own key). Done after the
+  // checks above, so invalid requests don't count.
+  const usage = await takeRun(caller);
+  if (usage instanceof NextResponse) return usage;
 
   // Aborted when the visitor presses Stop or closes the tab. It cancels every
   // model call still running, so we stop paying for them.
@@ -168,13 +115,15 @@ export async function POST(req: Request) {
       };
 
       try {
-        send({ type: "start", remaining: usage.remaining });
+        // An own-key run leaves the free-run count alone, so don't report one.
+        send({ type: "start", ...(!caller.ownKey && { remaining: usage.remaining }) });
         await runAll({
           idea,
           purpose,
           style: styleInstruction(length, tone),
           maxTokens: LENGTHS[length].maxTokens,
           signal: cancel.signal,
+          keys: caller.keys,
           send,
         });
       } catch (err) {
@@ -210,6 +159,7 @@ async function runAll({
   style,
   maxTokens,
   signal,
+  keys,
   send,
 }: {
   idea: string;
@@ -217,9 +167,11 @@ async function runAll({
   style: string;
   maxTokens: number;
   signal: AbortSignal;
+  keys: UserKeys;
   send: (event: StreamEvent) => void;
 }) {
-  const options = { style, maxTokens, signal };
+  const ownKey = Boolean(keys.openrouter);
+  const options = { style, maxTokens, signal, apiKey: keys.openrouter };
 
   // 2. Search for similar existing work. This chain (write queries -> search)
   // runs at the same time as the idea generation below, so it adds little wait.
@@ -229,9 +181,9 @@ async function runAll({
     withFallbacks(QUERY_MODEL),
     idea,
     purpose,
-    signal
+    { signal, apiKey: keys.openrouter }
   )
-    .then((queries) => runSearches(sources, queries))
+    .then((queries) => runSearches(sources, queries, { tavilyKey: keys.tavily }))
     .catch((err) => {
       console.warn("Could not write search queries:", err instanceof Error ? err.message : err);
       return { results: [], report: skipAll(sources, "couldn't write search queries") };
@@ -282,11 +234,9 @@ async function runAll({
 
   if (!baseline && versions.length === 0) {
     console.warn("All models failed");
-    // Every call ran out of credits or hit a rate limit: a friendlier note than a generic error.
-    const outOfJuice = [baselineResult, ...directionResults].every(
-      (r) => r.status === "rejected" && isQuotaError(r.reason)
-    );
-    send(outOfJuice ? { type: "error", error: OUT_OF_JUICE, outOfJuice } : { type: "error", error: GENERIC_ERROR });
+    // Out of fuel, or the visitor's own key refused: a clearer note than a generic error.
+    const reasons = [baselineResult, ...directionResults].map((r) => (r.status === "rejected" ? r.reason : null));
+    send({ type: "error", ...explainFailure(reasons, ownKey) });
     return;
   }
 

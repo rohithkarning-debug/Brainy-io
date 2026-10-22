@@ -48,6 +48,7 @@ export type CallOptions = {
   style?: string; // writing style line from lib/style.ts
   maxTokens?: number;
   signal?: AbortSignal; // aborted when the visitor presses Stop or leaves
+  apiKey?: string; // the visitor's own OpenRouter key; defaults to the server's
 };
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -80,7 +81,18 @@ export function isQuotaError(err: unknown): boolean {
   return err instanceof HttpError && (err.status === 402 || err.status === 429);
 }
 
-type CallSettings = { temperature?: number; timeoutMs?: number; maxTokens?: number; signal?: AbortSignal };
+/** True if OpenRouter refused the API key itself (401). */
+export function isAuthError(err: unknown): boolean {
+  return err instanceof HttpError && err.status === 401;
+}
+
+type CallSettings = {
+  temperature?: number;
+  timeoutMs?: number;
+  maxTokens?: number;
+  signal?: AbortSignal;
+  apiKey?: string; // used for this call only; never stored or logged
+};
 
 /**
  * Send one system + user message to a model and return its raw text reply.
@@ -90,9 +102,8 @@ async function callModel(
   model: string,
   system: string,
   user: string,
-  { temperature = 0.9, timeoutMs = 30_000, maxTokens = 800, signal }: CallSettings = {}
+  { temperature = 0.9, timeoutMs = 30_000, maxTokens = 800, signal, apiKey = process.env.OPENROUTER_API_KEY }: CallSettings = {}
 ): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
 
   const res = await fetch(OPENROUTER_URL, {
@@ -180,7 +191,7 @@ export async function generateVersion(
   systemPrompt: string,
   idea: string,
   purpose: Purpose,
-  { style, maxTokens, signal }: CallOptions = {}
+  { style, maxTokens, signal, apiKey }: CallOptions = {}
 ): Promise<IdeaJSON & { model: string }> {
   const { guidance, fields } = PURPOSES[purpose];
 
@@ -194,7 +205,7 @@ export async function generateVersion(
   const styleLine = style ? `\n\n${style}` : "";
   const system = `${systemPrompt}\n\n${guidance}${styleLine}\n\nRespond with ONLY a JSON object, no markdown, no extra text, in exactly this shape:\n${shape}`;
 
-  const { text, model } = await callWithFallback(models, system, idea, { maxTokens, signal });
+  const { text, model } = await callWithFallback(models, system, idea, { maxTokens, signal, apiKey });
   const obj = extractJSON(text);
 
   // Make sure every field exists and is a non-empty string.
@@ -229,11 +240,17 @@ export async function writeSearchQueries(
   models: string[],
   idea: string,
   purpose: Purpose,
-  signal?: AbortSignal
+  { signal, apiKey }: CallOptions = {}
 ): Promise<SearchQueries> {
   const { label, searchHint } = PURPOSES[purpose];
   const user = `Purpose: ${label}. Look for: ${searchHint}.\n\nIdea:\n${idea}`;
-  const { text } = await callWithFallback(models, QUERY_PROMPT, user, { temperature: 0.3, timeoutMs: 15_000, maxTokens: 300, signal });
+  const { text } = await callWithFallback(models, QUERY_PROMPT, user, {
+    temperature: 0.3,
+    timeoutMs: 15_000,
+    maxTokens: 300,
+    signal,
+    apiKey,
+  });
   const obj = extractJSON(text);
 
   const clean = (list: unknown, max: number) =>
@@ -281,7 +298,7 @@ export async function judgeIdea(
   purpose: Purpose,
   versions: Version[],
   results: SearchResult[] | null,
-  { style, signal }: CallOptions = {}
+  { style, signal, apiKey }: CallOptions = {}
 ): Promise<BrainyTake> {
   const { label, fields } = PURPOSES[purpose];
 
@@ -315,6 +332,7 @@ export async function judgeIdea(
     timeoutMs: 60_000,
     maxTokens: 2000,
     signal,
+    apiKey,
   });
   const obj = extractJSON(text);
 

@@ -26,7 +26,8 @@ export type Result = {
   search: SearchReport | null;
   error?: string;
   limited?: boolean; // the run was refused by the daily limit
-  outOfJuice?: boolean; // every model was out of credits or rate-limited
+  outOfJuice?: boolean; // the server key's free fuel was out (daily pool used up, or every model out of credits)
+  keyProblem?: boolean; // the visitor's own key was refused or out of credits
   pinned?: boolean; // shown on the Saved page; survives "Clear history"
 };
 

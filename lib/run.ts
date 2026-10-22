@@ -5,6 +5,7 @@
 
 import { useSyncExternalStore } from "react";
 import { saveResult, type Result } from "@/lib/history";
+import { keyHeaders } from "@/lib/keys";
 import type { Purpose } from "@/lib/purposes";
 import { STREAM_CONTENT_TYPE, type StreamEvent } from "@/lib/stream";
 import type { AnswerLength, Tone } from "@/lib/style";
@@ -15,8 +16,10 @@ const runs = new Map<string, Result>(); // every run started in this tab
 const controllers = new Map<string, AbortController>(); // only runs still cooking
 const listeners = new Set<() => void>();
 
-// Runs left today. undefined = not asked yet, null = no limits.
+// Free runs left today. undefined = not asked yet, null = no limits.
 let remaining: number | null | undefined;
+// True once the server key's daily pool is used up ("free fuel is out").
+let fuelOut = false;
 
 function emit() {
   listeners.forEach((l) => l());
@@ -80,8 +83,18 @@ export function useRemaining(): number | null | undefined {
   );
 }
 
-function setRemaining(value: number | null) {
+/** True when Brainy's free fuel (the server key's daily pool) is used up. */
+export function useFuelOut(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => fuelOut,
+    () => false
+  );
+}
+
+function setRemaining(value: number | null, out?: boolean) {
   remaining = value;
+  if (out !== undefined) fuelOut = out;
   emit();
 }
 
@@ -90,7 +103,7 @@ export async function refreshRemaining() {
   try {
     const res = await fetch("/api/expand");
     const data = await res.json();
-    setRemaining(data.remaining ?? null);
+    setRemaining(data.remaining ?? null, Boolean(data.fuelOut));
   } catch {
     // Not important enough to show an error.
   }
@@ -104,7 +117,8 @@ async function execute(id: string, input: RunInput) {
   try {
     const res = await fetch("/api/expand", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      // The visitor's own keys, if any, ride along in headers (see lib/keys.ts).
+      headers: { "Content-Type": "application/json", ...keyHeaders() },
       body: JSON.stringify(input),
       signal: controller.signal,
     });
@@ -112,11 +126,13 @@ async function execute(id: string, input: RunInput) {
     // Bad input and hit limits come back as plain JSON, not a stream.
     if (!res.headers.get("content-type")?.includes(STREAM_CONTENT_TYPE) || !res.body) {
       const data = await res.json().catch(() => ({}));
-      if (data.remaining !== undefined) setRemaining(data.remaining);
+      if (data.remaining !== undefined) setRemaining(data.remaining, data.fuelOut ? true : undefined);
       update(id, () => ({
         status: "error",
         error: data.error ?? `Brainy couldn't answer (HTTP ${res.status}). Please try again.`,
-        limited: Boolean(data.limitReached),
+        limited: Boolean(data.limitReached) && !data.fuelOut,
+        outOfJuice: Boolean(data.fuelOut),
+        keyProblem: Boolean(data.keyProblem),
       }));
       return;
     }
@@ -124,7 +140,7 @@ async function execute(id: string, input: RunInput) {
     for await (const event of readEvents(res.body)) {
       switch (event.type) {
         case "start":
-          setRemaining(event.remaining);
+          if (event.remaining !== undefined) setRemaining(event.remaining);
           break;
         case "search":
           update(id, () => ({ search: event.search }));
@@ -140,7 +156,13 @@ async function execute(id: string, input: RunInput) {
           break;
         case "error":
           finished = true;
-          update(id, () => ({ status: "error", error: event.error, outOfJuice: event.outOfJuice }));
+          if (event.outOfJuice) setRemaining(remaining ?? null, true);
+          update(id, () => ({
+            status: "error",
+            error: event.error,
+            outOfJuice: event.outOfJuice,
+            keyProblem: event.keyProblem,
+          }));
           break;
         case "done":
           finished = true;

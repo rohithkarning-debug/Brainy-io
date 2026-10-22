@@ -34,10 +34,11 @@ const TIMEOUT_MS = 15_000;
  */
 export async function runSearches(
   sources: SearchSource[],
-  queries: SearchQueries
+  queries: SearchQueries,
+  { tavilyKey }: { tavilyKey?: string } = {}
 ): Promise<{ results: SearchResult[]; report: SearchReport }> {
   const fetchers: Record<SearchSource, () => Promise<SearchResult[]>> = {
-    web: () => searchWeb(queries.web),
+    web: () => searchWeb(queries.web, tavilyKey),
     github: () => searchGitHub(queries.keywords),
     arxiv: () => searchArxiv(queries.keywords),
   };
@@ -67,8 +68,10 @@ export function skipAll(sources: SearchSource[], reason: string): SearchReport {
 
 // ---------- Web (Tavily) ----------
 // Docs: https://docs.tavily.com/documentation/api-reference/endpoint/search
-async function searchWeb(queries: string[]): Promise<SearchResult[]> {
-  const apiKey = process.env.TAVILY_API_KEY;
+// `userKey` is the visitor's own Tavily key: used for this request only, and
+// if it's refused we say so rather than quietly using the server's key.
+async function searchWeb(queries: string[], userKey?: string): Promise<SearchResult[]> {
+  const apiKey = userKey ?? process.env.TAVILY_API_KEY;
   if (!apiKey) throw new Error("TAVILY_API_KEY is not set");
   if (queries.length === 0) throw new Error("no queries");
 
@@ -81,6 +84,7 @@ async function searchWeb(queries: string[]): Promise<SearchResult[]> {
         body: JSON.stringify({ query, search_depth: "basic", topic: "general", max_results: PER_SOURCE }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
+      if (userKey && (res.status === 401 || res.status === 403)) throw new Error("your Tavily key was rejected");
       if (!res.ok) throw new Error(`Tavily HTTP ${res.status}`);
       const data = await res.json();
       return (data.results ?? []) as { title: string; url: string; content: string; score: number }[];
@@ -217,5 +221,6 @@ function shortReason(message: string) {
   if (/timeout|aborted/i.test(message)) return "timed out";
   if (/is not set/i.test(message)) return "no API key";
   if (/rate limit/i.test(message)) return "rate limited";
+  if (/key was rejected/i.test(message)) return "your Tavily key was rejected";
   return "unavailable";
 }

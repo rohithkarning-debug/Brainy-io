@@ -54,10 +54,27 @@ export default function PrivacyPage() {
           ),
         },
         {
+          heading: "Your own API keys",
+          body: (
+            <>
+              <p>
+                If you add your own OpenRouter or Tavily key in Settings, it is stored only in your browser&apos;s
+                localStorage. It is sent to Brainy with each request over HTTPS, in a request header, and the server
+                uses it for that request only, to call OpenRouter or Tavily on your behalf.
+              </p>
+              <p>
+                Brainy never stores your key in its database, logs, analytics or error messages, and never shows more
+                than its last 4 characters. If your key is rejected, Brainy tells you instead of quietly using its own
+                key. Remove a key any time in Settings, and revoke it with the provider if you want it gone everywhere.
+              </p>
+            </>
+          ),
+        },
+        {
           heading: "Usage limits",
           body: (
             <p>
-              Each account gets {RUNS_PER_USER_PER_DAY} runs a day. To enforce this, Brainy keeps daily run counters
+              Each account gets {RUNS_PER_USER_PER_DAY} free runs a day, and runs on your own key have a separate fair-use cap. To enforce this, Brainy keeps daily run counters
               keyed on your account id and IP address. They reset every day and hold nothing else.
             </p>
           ),

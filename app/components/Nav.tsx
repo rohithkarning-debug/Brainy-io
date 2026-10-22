@@ -5,9 +5,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { Logo } from "@/app/components/Logo";
+import { RunsBadge } from "@/app/components/RunsBadge";
 import { Icon } from "@/app/components/ui";
 import { UserMenu } from "@/app/components/UserMenu";
 import { useCooked } from "@/lib/reveal";
+import { refreshRemaining } from "@/lib/run";
 
 // `private` links only show when signed in; signed-out visitors get "Sign in" instead (UserMenu).
 const LINKS = [
@@ -35,6 +37,11 @@ export function Nav() {
   const cooked = useCooked();
   const signedIn = useSession().status === "authenticated";
   const links = LINKS.filter((link) => signedIn || !link.private);
+
+  // Load today's free-run count for the badge once signed in.
+  useEffect(() => {
+    if (signedIn) void refreshRemaining();
+  }, [signedIn]);
   const [open, setOpen] = useState(false);
   const [lastPath, setLastPath] = useState(pathname);
 
@@ -77,7 +84,8 @@ export function Nav() {
           ))}
         </ul>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {signedIn && <RunsBadge className="hidden lg:inline-flex" />}
           <UserMenu />
 
           {/* Mobile menu button */}

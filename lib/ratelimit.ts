@@ -4,21 +4,32 @@
 // counters have to live in an outside store. If the Upstash env vars aren't
 // set (e.g. local development), limits are switched off and every run is allowed.
 //
-// Three counters: per signed-in user (the real limit), per IP (a looser backup
-// that stops one person cycling through many accounts), and one global pool.
+// Runs on the server's OpenRouter key ("free runs") use three counters: per
+// signed-in user (the real limit), per IP (a looser backup that stops one
+// person cycling through many accounts), and one global pool that caps what
+// the server key can spend in a day (GLOBAL_DAILY_RUNS).
+// Runs on the visitor's own key only count against a generous per-user cap.
 //
 // Server-only: never import this from the page.
 
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
-import { GLOBAL_RUNS_PER_DAY, RUNS_PER_IP_PER_DAY, RUNS_PER_USER_PER_DAY } from "@/lib/limits";
+import {
+  BYOK_RUNS_PER_USER_PER_DAY,
+  DEFAULT_GLOBAL_DAILY_RUNS,
+  RUNS_PER_IP_PER_DAY,
+  RUNS_PER_USER_PER_DAY,
+} from "@/lib/limits";
 
 // Prefer the UPSTASH_* names; fall back to the KV_* names that Vercel's
 // Upstash integration creates.
 const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
 const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
 
-const redis = url && token ? new Redis({ url, token }) : null;
+/** The shared Redis client, or null when Upstash isn't configured. */
+export const redis = url && token ? new Redis({ url, token }) : null;
+
+const GLOBAL_DAILY_RUNS = Math.max(0, Math.floor(Number(process.env.GLOBAL_DAILY_RUNS))) || DEFAULT_GLOBAL_DAILY_RUNS;
 
 // Fixed 1-day windows: counters reset at midnight UTC.
 function daily(runs: number, prefix: string) {
@@ -26,14 +37,16 @@ function daily(runs: number, prefix: string) {
 }
 const perUser = daily(RUNS_PER_USER_PER_DAY, "brainy:user");
 const perIp = daily(RUNS_PER_IP_PER_DAY, "brainy:ip");
-const everyone = daily(GLOBAL_RUNS_PER_DAY, "brainy:global");
+const serverPool = daily(GLOBAL_DAILY_RUNS, "brainy:global");
+const perUserOwnKey = daily(BYOK_RUNS_PER_USER_PER_DAY, "brainy:byok");
 
 // The single key used for the global counter.
 const GLOBAL_KEY = "all";
 
 export type Usage = {
-  remaining: number | null; // runs this user has left today; null = limits are off
-  blockedBy: "user" | "ip" | "global" | null; // which limit stopped them, if any
+  remaining: number | null; // free runs this user has left today; null = limits are off
+  // Which limit stopped them, if any. "global" = the server key's daily pool is used up.
+  blockedBy: "user" | "ip" | "global" | "own-key" | null;
 };
 
 // Who is asking: the signed-in user's id plus their IP.
@@ -46,14 +59,14 @@ export function getClientIp(req: Request): string {
   return forwarded?.split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
 }
 
-// Look at the counters without using up a run (for showing "3 runs left").
+// Look at the free-run counters without using up a run (for "3 free runs left").
 export async function checkUsage({ userId, ip }: Visitor): Promise<Usage> {
-  if (!perUser || !perIp || !everyone) return { remaining: null, blockedBy: null };
+  if (!perUser || !perIp || !serverPool) return { remaining: null, blockedBy: null };
 
   const [mine, here, all] = await Promise.all([
     perUser.getRemaining(userId),
     perIp.getRemaining(ip),
-    everyone.getRemaining(GLOBAL_KEY),
+    serverPool.getRemaining(GLOBAL_KEY),
   ]);
   // The IP backup only shows up in the count once it's the tighter limit.
   const remaining = Math.max(0, Math.min(mine.remaining, here.remaining));
@@ -63,9 +76,19 @@ export async function checkUsage({ userId, ip }: Visitor): Promise<Usage> {
   return { remaining, blockedBy: null };
 }
 
-// Use up one run for this user (and one from the IP and global pools).
-export async function consumeRun(visitor: Visitor): Promise<Usage> {
-  if (!perUser || !perIp || !everyone) return { remaining: null, blockedBy: null };
+/**
+ * Use up one run. `ownKey` = the visitor sent their own OpenRouter key, so only
+ * the anti-abuse cap applies and their free runs are left alone.
+ */
+export async function consumeRun(visitor: Visitor, { ownKey = false }: { ownKey?: boolean } = {}): Promise<Usage> {
+  if (ownKey) {
+    if (!perUserOwnKey) return { remaining: null, blockedBy: null };
+    const mine = await perUserOwnKey.limit(visitor.userId);
+    // `remaining` here is the free-run count, which an own-key run doesn't change: leave it unknown.
+    return { remaining: null, blockedBy: mine.success ? null : "own-key" };
+  }
+
+  if (!perUser || !perIp || !serverPool) return { remaining: null, blockedBy: null };
 
   // Check first, so a visitor doesn't lose a run when another limit is already hit.
   const before = await checkUsage(visitor);
@@ -77,7 +100,7 @@ export async function consumeRun(visitor: Visitor): Promise<Usage> {
   const here = await perIp.limit(visitor.ip);
   if (!here.success) return { remaining: 0, blockedBy: "ip" };
 
-  const all = await everyone.limit(GLOBAL_KEY);
+  const all = await serverPool.limit(GLOBAL_KEY);
   const remaining = Math.min(mine.remaining, here.remaining);
   if (!all.success) return { remaining, blockedBy: "global" };
 
