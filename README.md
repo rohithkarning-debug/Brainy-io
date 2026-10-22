@@ -15,6 +15,9 @@ npm run dev                  # http://localhost:3000
 
 Only `OPENROUTER_API_KEY` is required locally. Leave the Upstash vars blank to
 turn daily limits off. **Set them for any public deploy**, or limits are off there too.
+Redis config is read from `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`,
+falling back to `KV_REST_API_URL` / `KV_REST_API_TOKEN` (the names Vercel's
+Upstash integration creates), so either pair works.
 
 ## How it fits together
 

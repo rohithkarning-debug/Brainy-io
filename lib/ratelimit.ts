@@ -10,14 +10,12 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import { GLOBAL_RUNS_PER_DAY, RUNS_PER_IP_PER_DAY } from "@/lib/limits";
 
-// Redis.fromEnv() reads UPSTASH_REDIS_REST_URL / _TOKEN, or the KV_REST_API_URL /
-// _TOKEN names that Vercel's Upstash integration creates. Check for the same pair.
-const configured = Boolean(
-  (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL) &&
-    (process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN)
-);
+// Prefer the UPSTASH_* names; fall back to the KV_* names that Vercel's
+// Upstash integration creates.
+const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
 
-const redis = configured ? Redis.fromEnv() : null;
+const redis = url && token ? new Redis({ url, token }) : null;
 
 // Fixed 1-day windows: counters reset at midnight UTC.
 const perIp =
