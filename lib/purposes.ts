@@ -5,11 +5,12 @@
 export type Purpose = "startup" | "hackathon" | "research";
 
 // Where we look for things that already exist.
-export type SearchSource = "web" | "github" | "arxiv";
+export type SearchSource = "web" | "github" | "devpost" | "arxiv";
 
 export const SOURCE_LABELS: Record<SearchSource, string> = {
   web: "Web",
   github: "GitHub",
+  devpost: "Devpost",
   arxiv: "arXiv",
 };
 
@@ -57,7 +58,7 @@ export const PURPOSES: Record<Purpose, PurposeConfig> = {
     tagline: "Buildable in 48h, wows judges",
     guidance:
       "The user wants to build this at a HACKATHON. It must be buildable by a small team in 24-48 hours, have a clear live demo moment, and impress judges.",
-    sources: ["web", "github"],
+    sources: ["web", "github", "devpost"],
     searchHint: "existing hackathon projects (e.g. on Devpost), open-source repos and apps that already do this",
     fields: [
       { key: "buildPlan", label: "What to build in 48h", hint: "the minimal scope and rough tech stack" },

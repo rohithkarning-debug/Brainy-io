@@ -14,7 +14,8 @@ import { failureResponse, identify, takeRun } from "@/lib/server/guard";
 import { CROSS_MODEL, withFallbacks } from "@/lib/server/models";
 import { LENGTHS, styleInstruction } from "@/lib/style";
 
-export const maxDuration = 60;
+// One 45s call, plus one retry on the next model if it times out or its reply is unusable.
+export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {

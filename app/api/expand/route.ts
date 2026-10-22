@@ -31,11 +31,13 @@ import { STREAM_CONTENT_TYPE, type StreamEvent } from "@/lib/stream";
 import { LENGTHS, isLength, isTone, styleInstruction, type AnswerLength, type Tone } from "@/lib/style";
 
 // Longest this function may run on Vercel, in seconds. The Hobby (free) plan
-// allows up to 300. A normal run takes 20-60s; the worst case with every
-// timeout hit is about 95s (search chain + models in parallel, then the judge).
-// Model fallbacks don't change this much: they only kick in on quick failures
-// (402/429/5xx), never on a timeout.
-export const maxDuration = 120;
+// allows up to 300. A normal run takes 20-90s. The worst case with every
+// timeout hit is about 250s: the search chain (with arXiv's 3-second queue)
+// alongside the models, then a judge that times out at 100s (90s without the
+// Devpost / arXiv sections) and, if it times out or its reply is unusable,
+// one retry on the next model. Other model fallbacks only kick in on quick
+// failures (402/404/429/5xx), never on a timeout.
+export const maxDuration = 280;
 
 // Always run fresh: remaining-run counts must never be cached.
 export const dynamic = "force-dynamic";
@@ -246,8 +248,16 @@ async function runAll({
   let take: BrainyTake | null = null;
   try {
     const all = baseline ? [baseline, ...versions] : versions;
-    const searched = search.report.ran.length > 0;
-    take = await judgeIdea(withFallbacks(JUDGE_MODEL), idea, purpose, all, searched ? search.results : null, options);
+    // Web and GitHub feed "similar things"; Devpost and arXiv get their own
+    // sections (Built before, Papers), and are only passed when they ran.
+    const { ran } = search.report;
+    const general = search.results.filter((r) => r.source === "web" || r.source === "github");
+    const generalRan = ran.includes("web") || ran.includes("github");
+    const special = {
+      ...(ran.includes("devpost") && { devpost: search.results.filter((r) => r.source === "devpost") }),
+      ...(ran.includes("arxiv") && { arxiv: search.results.filter((r) => r.source === "arxiv") }),
+    };
+    take = await judgeIdea(withFallbacks(JUDGE_MODEL), idea, purpose, all, generalRan ? general : null, options, special);
   } catch (err) {
     console.warn("Judge failed:", err instanceof Error ? err.message : err);
   }

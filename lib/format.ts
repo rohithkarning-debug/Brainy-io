@@ -40,6 +40,24 @@ export function takeToText(take: BrainyTake) {
   if (take.similarExisting.length > 0) {
     lines.push("Similar things that exist:", ...take.similarExisting.map((s) => `- ${s.title}${s.url ? ` (${s.url})` : ""}`));
   }
+  if (take.builtBefore) {
+    const { found, projects, twist } = take.builtBefore;
+    lines.push(
+      found === 0
+        ? "Built before: no close matches found on Devpost."
+        : `Built before: we found ${found} similar hackathon project${found === 1 ? "" : "s"} on Devpost:`,
+      ...projects.slice(0, 5).map((p) => `- ${p.title} (${p.closeness} match, ${p.url})`),
+      twist && `The twist none of them tried: ${twist}`
+    );
+  }
+  if (take.papers) {
+    const { papers, gap } = take.papers;
+    lines.push(
+      ...(papers.length > 0 ? ["Closest papers:"] : []),
+      ...papers.map((p) => `- ${p.title}${p.year ? ` (${p.year})` : ""}: ${p.url}`),
+      gap && `The gap: ${gap}`
+    );
+  }
   return lines.filter(Boolean).join("\n");
 }
 

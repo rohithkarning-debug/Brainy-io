@@ -16,11 +16,19 @@ const STEPS = [
   },
   {
     title: "A live search for what already exists",
-    body: "At the same time, Brainy searches the web, GitHub and arXiv (depending on the purpose) for products, repos and papers that already do this.",
+    body: "At the same time, Brainy searches the web, GitHub, past hackathon projects on Devpost and papers on arXiv (depending on the purpose) for things that already do this.",
   },
   {
     title: "One honest judge",
     body: "A separate judge model reads every version and the search results, rates how crowded the space is, and picks the most unique idea that could still work.",
+  },
+  {
+    title: "Prior work, for hackathons and research",
+    body: "Hackathon ideas get a \"Built before\" card: how many similar Devpost projects we found, the closest few, and the twist none of them tried. Research ideas get the closest arXiv papers, what each didn't do, and the gap your idea fills. Only real search results are cited.",
+  },
+  {
+    title: "Breed the best ones",
+    body: "Pick any two directions and cross them into three offspring that fuse a trait from each. Keep crossing for new generations, watch the family tree grow on the Lineage tab, and ask the judge to rank a generation.",
   },
 ];
 
@@ -54,10 +62,20 @@ export default function AboutPage() {
       <section className="mt-14">
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-slate-950">Good to know</h2>
         <ul className="mt-4 list-disc space-y-2 pl-5 leading-relaxed text-slate-600">
-          <li>Every signed-in account gets {RUNS_PER_USER_PER_DAY} free runs a day. Regenerating counts as a run.</li>
           <li>
-            Your history, saved results and settings are stored in this browser only. A result link opens on the
-            device that made it.
+            Every signed-in account gets {RUNS_PER_USER_PER_DAY} free runs a day. Regenerating, crossing two ideas and
+            judging a generation each count as a run.
+          </li>
+          <li>
+            Out of free runs? Add your own free OpenRouter key in{" "}
+            <Link href="/settings#api-keys" className="font-medium text-slate-950 underline underline-offset-2">
+              Settings
+            </Link>
+            . It stays in this browser, and runs on it don&apos;t touch your free runs.
+          </li>
+          <li>
+            Your history, saved results, family trees, settings and keys are stored in this browser only. A result
+            link opens on the device that made it.
           </li>
           <li>The verdict is an informed opinion, not a market study. Do your own check before betting on it.</li>
         </ul>

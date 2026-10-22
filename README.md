@@ -54,6 +54,24 @@ draws it as plain SVG (`app/components/LineageTree.tsx`): left to right on wide
 screens, top to bottom on narrow ones, with pan, pinch / Ctrl+scroll zoom and
 ancestor lines lit on hover or focus.
 
+## Prior work: Devpost and arXiv
+
+- **Hackathon** runs also search past hackathon projects with Tavily limited to
+  `devpost.com` project pages (Devpost has no public API; it is never scraped).
+  The judge keeps the genuinely similar ones, rates each high / medium / low,
+  and names "the twist none of them tried". The card says "We found N similar
+  hackathon projects", or "No close matches found, which is a good sign".
+- **Research** runs query the official arXiv API (`export.arxiv.org/api/query`):
+  one request per search, at most one every 3 seconds across all instances
+  (a Redis lock), with answers cached in Upstash for 24 hours. The judge keeps
+  the 3-5 closest papers, says what each did and didn't do, and names the gap,
+  flagging when it isn't sure.
+
+In both, the judge refers to results by id and the server looks up every
+title, link, author and year itself (`lib/openrouter.ts`), so a paper or
+project can never be invented. If the judge's reply is malformed or times out,
+it is retried once on the next model.
+
 ## Sign-in
 
 Google and GitHub sign-in via Auth.js v5 (`auth.ts`), with JWT sessions, so no database.
@@ -67,8 +85,11 @@ global pool (`GLOBAL_DAILY_RUNS`, default 60). Each OAuth app needs these callba
 
 ## How it fits together
 
-- `app/api/expand/route.ts`: the only place API keys are used. `POST` streams
+- `app/api/expand/route.ts`: the main run. `POST` streams
   newline-delimited JSON events (`lib/stream.ts`) as each model finishes.
+- `app/api/cross`, `app/api/judge-generation`: idea breeding; `app/api/keys/test`
+  checks a visitor's own key. All model routes share `lib/server/guard.ts`.
+- `lib/search.ts`: web, GitHub, Devpost (via Tavily) and arXiv searches.
 - `lib/run.ts`: reads that stream in the browser and fills in a live result.
 - `lib/history.ts`, `lib/settings.ts`: history, saved results and settings,
   all kept in the visitor's localStorage.

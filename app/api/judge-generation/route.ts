@@ -15,7 +15,8 @@ import { failureResponse, identify, takeRun } from "@/lib/server/guard";
 import { JUDGE_MODEL, withFallbacks } from "@/lib/server/models";
 import { styleInstruction } from "@/lib/style";
 
-export const maxDuration = 90;
+// One 60s call, plus one retry on the next model if it times out or its reply is unusable.
+export const maxDuration = 150;
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {

@@ -7,6 +7,7 @@ import { BrainyTakeCard } from "@/app/components/BrainyTakeCard";
 import { CookingLoader, SkeletonCard } from "@/app/components/CookingLoader";
 import { useCopyShare } from "@/app/components/CopyShare";
 import { CrossBar, LineagePanel } from "@/app/components/Lineage";
+import { BuiltBeforeCard, PapersCard } from "@/app/components/PriorWorkCards";
 import { useToast } from "@/app/components/Toast";
 import { ActionButton, SectionTitle, TabPanel, Tabs } from "@/app/components/ui";
 import { VersionCard } from "@/app/components/VersionCard";
@@ -286,12 +287,16 @@ export function ResultView({
 
           <TabPanel id="verdict" active={tab === "verdict"}>
             {result.take ? (
-              <BrainyTakeCard
-                take={result.take}
-                search={result.search ?? { ran: [], skipped: [] }}
-                purpose={purpose}
-                live={live}
-              />
+              <>
+                <BrainyTakeCard
+                  take={result.take}
+                  search={result.search ?? { ran: [], skipped: [] }}
+                  purpose={purpose}
+                  live={live}
+                />
+                {purpose === "hackathon" && <BuiltBeforeCard built={result.take.builtBefore} search={result.search} />}
+                {purpose === "research" && <PapersCard report={result.take.papers} search={result.search} />}
+              </>
             ) : cooking ? (
               <div className="rounded-3xl border border-line bg-surface/70 shadow-card backdrop-blur">
                 <CookingLoader progress={progress} />

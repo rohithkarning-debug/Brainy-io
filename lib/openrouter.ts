@@ -42,6 +42,25 @@ export type BrainyTake = {
   alternatives: { title: string; pitch: string }[]; // only when crowded/saturated
   followUps: string[]; // short ideas the user could run through Brainy next
   model: string;
+  builtBefore?: BuiltBefore; // Hackathon only, when the Devpost search ran
+  papers?: PaperReport; // Research only, when the arXiv search ran
+};
+
+export type Closeness = "high" | "medium" | "low";
+
+// "Already built at a hackathon": Devpost projects the judge kept as similar.
+// Every title and link comes from the search results, never from the model.
+export type BuiltBefore = {
+  found: number; // how many similar projects the judge kept (an honest count, not "built N times")
+  projects: { title: string; url: string; summary: string; closeness: Closeness }[]; // closest first
+  twist: string; // the twist none of them tried, for Brainy's pick
+};
+
+// "Papers that almost did this": arXiv papers the judge kept as close.
+export type PaperReport = {
+  papers: { title: string; url: string; authors: string[]; year?: number; did: string; missed: string }[];
+  gap: string; // the specific gap Brainy's pick fills
+  confident: boolean; // false = the judge says it isn't sure
 };
 
 // Per-run options passed down from the API route.
@@ -63,9 +82,10 @@ export const FREE_MODELS = [
   "google/gemma-4-31b-it:free",
 ];
 
-// Statuses worth trying another model for: out of credits, rate-limited, or down.
+// Statuses worth trying another model for: out of credits, rate-limited,
+// down, or (404) no longer offered by its provider.
 function shouldFallBack(status: number) {
-  return status === 402 || status === 429 || status >= 500;
+  return status === 402 || status === 404 || status === 429 || status >= 500;
 }
 
 // A non-2xx reply from OpenRouter, keeping the status so we can decide whether to fall back.
@@ -160,6 +180,47 @@ async function callWithFallback(
       if (!(err instanceof HttpError) || !shouldFallBack(err.status) || settings.signal?.aborted) throw err;
       console.warn(`Falling back from ${model}:`, err.message);
       lastError = err;
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Like callWithFallback, but the reply must also parse. Long JSON replies
+ * (the verdict, a cross) occasionally come back malformed, and free reasoning
+ * models sometimes run past their timeout; either way we try once more with
+ * the next model in the list instead of losing the whole answer.
+ */
+async function callAndParse<T>(
+  models: string[],
+  system: string,
+  user: string,
+  settings: CallSettings,
+  parse: (text: string, model: string) => T
+): Promise<T> {
+  let remaining = models;
+  let lastError: unknown = new Error("No models given");
+  for (let attempt = 0; attempt < 2 && remaining.length > 0; attempt++) {
+    let reply: { text: string; model: string };
+    try {
+      reply = await callWithFallback(remaining, system, user, settings);
+    } catch (err) {
+      // Only a timeout of the first model in line is worth another go; the
+      // fallback chain already handled quick failures, and a cancel is final.
+      const timedOut = err instanceof Error && err.name === "TimeoutError";
+      if (!timedOut || settings.signal?.aborted) throw err;
+      console.warn(`Timed out on ${remaining[0]}, trying the next model`);
+      lastError = err;
+      remaining = remaining.slice(1);
+      continue;
+    }
+    try {
+      return parse(reply.text, reply.model);
+    } catch (err) {
+      if (settings.signal?.aborted) throw err;
+      console.warn(`Unusable reply from ${reply.model}:`, err instanceof Error ? err.message : err);
+      lastError = err;
+      remaining = remaining.slice(remaining.indexOf(reply.model) + 1);
     }
   }
   throw lastError;
@@ -261,8 +322,9 @@ export async function writeSearchQueries(
   return queries;
 }
 
-// The judge's instructions. Step 1 changes depending on whether a live search ran.
-function judgePrompt(searched: boolean) {
+// The judge's instructions. Step 1 changes depending on whether a live search
+// ran; steps 6 and 7 only appear for Hackathon (Devpost) and Research (arXiv).
+function judgePrompt(searched: boolean, { devpost = false, arxiv = false }: { devpost?: boolean; arxiv?: boolean } = {}) {
   const similarStep = searched
     ? `1. Similar things: read the numbered search results. Keep ONLY the ones that are truly similar to the idea or its versions: real products, companies, projects, repos or papers that do roughly the same thing. Ignore news articles, listicles, "top 10" posts, generic tool pages and anything only loosely related. For each one you keep, give its number and a one-line note on how it is similar. If none are close, return an empty list. Never mention anything that is not in the results.`
     : `1. Similar things: no live search was available. List real existing products, companies, papers or projects that are similar, ONLY if you actually know them, each with a one-line note on how it is similar (empty list if not; never invent names).`;
@@ -271,17 +333,29 @@ function judgePrompt(searched: boolean) {
     : "Base this on what you know.";
   const similarShape = searched ? `[{"id": 3, "note": "..."}]` : `[{"name": "...", "note": "..."}]`;
 
-  return `You are Brainy, a brutally honest judge of ideas. You will get a user's original idea, what it is for, several AI-generated versions of it${searched ? ", and numbered results from a live search for similar existing work" : ""}.
+  const extraSteps = [
+    devpost &&
+      `6. Built before: read the past hackathon projects from Devpost (ids D1, D2, ...). Keep ONLY projects genuinely similar to the idea or its versions. For each one you keep: its id, a one-line summary of what that project built, and how close it is to the idea: "high", "medium" or "low". Return an empty list if none are close. Then name "the twist none of them tried": one concrete twist for Brainy's pick that none of the kept projects did.`,
+    arxiv &&
+      `${devpost ? 7 : 6}. Papers: read the arXiv papers (ids P1, P2, ...). Keep the 3 to 5 closest to the idea (fewer if fewer are relevant, none if none are). For each: its id, "did": one line on what the paper did, and "missed": what it did not do that this idea needs. Then "gap": the specific gap Brainy's pick fills, citing papers only by these ids. Only cite papers from this list; never invent papers, authors or results. If you are unsure whether a paper is really close, or what the gap is, say so plainly in "gap" and set "confident" to false.`,
+  ].filter(Boolean);
+  const extraShape = [
+    devpost && `"builtBefore": {"projects": [{"id": "D2", "summary": "one line", "closeness": "high" | "medium" | "low"}], "twist": "one or two sentences"}`,
+    arxiv && `"papers": {"closest": [{"id": "P1", "did": "one line", "missed": "one line"}], "gap": "one or two sentences", "confident": true | false}`,
+  ].filter(Boolean);
 
-Do five things:
+  return `You are Brainy, a brutally honest judge of ideas. You will get a user's original idea, what it is for, several AI-generated versions of it${searched ? ", and numbered results from a live search for similar existing work" : ""}${devpost ? ", past hackathon projects from Devpost" : ""}${arxiv ? ", and arXiv papers" : ""}.
+
+Do ${5 + extraSteps.length} things:
 ${similarStep}
 2. Saturation: judge how crowded this space already is. Pick exactly one of "Fresh", "Crowded", "Very saturated". ${saturationBasis} Give a one-line reason. Never call the idea "unique".
 3. Brainy's pick: choose the single most unique-but-still-workable direction. Either take one of the versions and improve it, or propose a new angle none of them found. Say which version it is based on (its direction label) or "New angle".
 4. If saturation is "Crowded" or "Very saturated", suggest 1-2 related but less crowded ideas to try instead. If "Fresh", return an empty list.
 5. Follow-ups: write 3 short ideas (one sentence, under 20 words each) the user could run through Brainy next, e.g. a sharper niche of your pick, a pivot, or a risky twist. Write them as ideas, not questions to the user.
+${extraSteps.join("\n")}
 
 Respond with ONLY a JSON object, no markdown, no extra text, in exactly this shape:
-{"similarExisting": ${similarShape}, "saturation": "Fresh" | "Crowded" | "Very saturated", "saturationReason": "one line", "pick": {"title": "...", "pitch": "one or two sentences", "basedOn": "direction label or New angle", "why": "one or two sentences"}, "alternatives": [{"title": "...", "pitch": "one sentence"}], "followUps": ["...", "...", "..."]}`;
+{"similarExisting": ${similarShape}, "saturation": "Fresh" | "Crowded" | "Very saturated", "saturationReason": "one line", "pick": {"title": "...", "pitch": "one or two sentences", "basedOn": "direction label or New angle", "why": "one or two sentences"}, "alternatives": [{"title": "...", "pitch": "one sentence"}], "followUps": ["...", "...", "..."]${extraShape.map((x) => ", " + x).join("")}}`;
 }
 
 const SATURATION_LEVELS = ["Fresh", "Crowded", "Very saturated"] as const;
@@ -290,7 +364,10 @@ const SATURATION_LEVELS = ["Fresh", "Crowded", "Very saturated"] as const;
  * Send the original idea, every generated version and the search results
  * to a stronger model and get back Brainy's honest verdict.
  * `models` is tried in order (see callWithFallback).
- * Pass `results = null` when no search source ran at all.
+ * Pass `results = null` when no general search source (web, GitHub) ran.
+ * `special` holds Devpost / arXiv results when those searches ran (an empty
+ * list = ran, found nothing); they get their own numbered lists (D1.., P1..)
+ * and their own sections in the verdict.
  * Throws if the reply is unusable.
  */
 export async function judgeIdea(
@@ -299,7 +376,8 @@ export async function judgeIdea(
   purpose: Purpose,
   versions: Version[],
   results: SearchResult[] | null,
-  { style, signal, apiKey }: CallOptions = {}
+  { style, signal, apiKey }: CallOptions = {},
+  special: { devpost?: SearchResult[]; arxiv?: SearchResult[] } = {}
 ): Promise<BrainyTake> {
   const { label, fields } = PURPOSES[purpose];
 
@@ -322,46 +400,124 @@ export async function judgeIdea(
           .map((r, i) => `[${i + 1}] (${SOURCE_LABELS[r.source]}) ${r.title}\n   ${r.url}\n   ${r.snippet}`)
           .join("\n");
 
-  const user = `Purpose: ${label}\n\nOriginal idea:\n${idea}\n\nGenerated versions:\n${versionsText}${resultsText}`;
+  const { devpost, arxiv } = special;
+  const devpostText = !devpost
+    ? ""
+    : "\n\nPast hackathon projects on Devpost:\n" +
+      (devpost.length === 0 ? "(none found)" : devpost.map((r, i) => `[D${i + 1}] ${r.title}\n   ${r.url}\n   ${r.snippet}`).join("\n"));
+  const arxivText = !arxiv
+    ? ""
+    : "\n\narXiv papers:\n" +
+      (arxiv.length === 0
+        ? "(none found)"
+        : arxiv
+            .map((r, i) => `[P${i + 1}] ${r.title} (${(r.authors ?? []).slice(0, 4).join(", ")}${r.year ? `, ${r.year}` : ""})\n   ${r.snippet}`)
+            .join("\n"));
+
+  const user = `Purpose: ${label}\n\nOriginal idea:\n${idea}\n\nGenerated versions:\n${versionsText}${resultsText}${devpostText}${arxivText}`;
 
   // Lower temperature: we want a careful judge, not a creative one.
-  const system = [judgePrompt(searched), style].filter(Boolean).join(" ");
+  const extras = { devpost: Boolean(devpost), arxiv: Boolean(arxiv) };
+  const system = [judgePrompt(searched, extras), style].filter(Boolean).join(" ");
   // The verdict JSON is usually 600-1,200 tokens; 2,000 leaves room for a
   // free reasoning model's short thinking without reserving a huge budget.
-  const { text, model } = await callWithFallback(models, system, user, {
-    temperature: 0.4,
-    timeoutMs: 60_000,
-    maxTokens: 2000,
-    signal,
-    apiKey,
+  // The Devpost / arXiv sections add a few hundred more.
+  // Free reasoning judges often need 40-80s for the full verdict (longer with
+  // the Devpost / arXiv sections), so allow that before trying the next model.
+  const extra = Boolean(devpost || arxiv);
+  const settings = { temperature: 0.4, timeoutMs: extra ? 100_000 : 90_000, maxTokens: extra ? 2800 : 2000, signal, apiKey };
+  return callAndParse(models, system, user, settings, (text, model): BrainyTake => {
+    const obj = extractJSON(text);
+
+    if (!SATURATION_LEVELS.includes(obj.saturation)) throw new Error("Bad saturation value");
+    if (!isText(obj.saturationReason)) throw new Error('Missing "saturationReason"');
+    if (!isText(obj.pick?.title) || !isText(obj.pick?.pitch)) throw new Error('Missing "pick"');
+
+    return {
+      saturation: obj.saturation,
+      saturationReason: obj.saturationReason,
+      similarExisting: parseSimilar(obj.similarExisting, results),
+      pick: {
+        title: obj.pick.title,
+        pitch: obj.pick.pitch,
+        basedOn: isText(obj.pick.basedOn) ? obj.pick.basedOn : "New angle",
+        why: isText(obj.pick.why) ? obj.pick.why : "",
+      },
+      // Keep at most 2 well-formed alternatives, and none if the idea is fresh.
+      alternatives:
+        obj.saturation === "Fresh" || !Array.isArray(obj.alternatives)
+          ? []
+          : obj.alternatives.filter((a: { title?: unknown; pitch?: unknown }) => isText(a?.title) && isText(a?.pitch)).slice(0, 2),
+      // Capped so a click can drop one straight into the idea box.
+      followUps: Array.isArray(obj.followUps)
+        ? obj.followUps.filter(isText).map((f: string) => f.trim().slice(0, 300)).slice(0, 3)
+        : [],
+      model,
+      ...(devpost && obj.builtBefore && { builtBefore: parseBuiltBefore(obj.builtBefore, devpost) }),
+      ...(arxiv && obj.papers && { papers: parsePapers(obj.papers, arxiv) }),
+    };
   });
-  const obj = extractJSON(text);
+}
 
-  if (!SATURATION_LEVELS.includes(obj.saturation)) throw new Error("Bad saturation value");
-  if (!isText(obj.saturationReason)) throw new Error('Missing "saturationReason"');
-  if (!isText(obj.pick?.title) || !isText(obj.pick?.pitch)) throw new Error('Missing "pick"');
+// Look up "D3" / "P2" style ids in the list they refer to. Unknown or repeated ids are dropped.
+function byId<T>(list: T[], prefix: string, raw: unknown, used: Set<number>): T | null {
+  const n = Number(String(raw ?? "").trim().toUpperCase().replace(prefix, ""));
+  if (!Number.isInteger(n) || n < 1 || n > list.length || used.has(n)) return null;
+  used.add(n);
+  return list[n - 1];
+}
 
-  return {
-    saturation: obj.saturation,
-    saturationReason: obj.saturationReason,
-    similarExisting: parseSimilar(obj.similarExisting, results),
-    pick: {
-      title: obj.pick.title,
-      pitch: obj.pick.pitch,
-      basedOn: isText(obj.pick.basedOn) ? obj.pick.basedOn : "New angle",
-      why: isText(obj.pick.why) ? obj.pick.why : "",
-    },
-    // Keep at most 2 well-formed alternatives, and none if the idea is fresh.
-    alternatives:
-      obj.saturation === "Fresh" || !Array.isArray(obj.alternatives)
-        ? []
-        : obj.alternatives.filter((a: { title?: unknown; pitch?: unknown }) => isText(a?.title) && isText(a?.pitch)).slice(0, 2),
-    // Capped so a click can drop one straight into the idea box.
-    followUps: Array.isArray(obj.followUps)
-      ? obj.followUps.filter(isText).map((f: string) => f.trim().slice(0, 300)).slice(0, 3)
-      : [],
-    model,
-  };
+const CLOSENESS: Closeness[] = ["high", "medium", "low"];
+
+// The judge refers to results by id ("P1 and P5 show..."). Visitors never see
+// those ids, so point them at the card's own numbering ("[1] and [3]"), or
+// name a result the card doesn't list by a short title.
+function rewriteRefs(text: string, prefix: string, list: SearchResult[], shown: string[]) {
+  return text.replace(new RegExp(`\\b${prefix}(\\d+)\\b`, "g"), (match, n) => {
+    const hit = list[Number(n) - 1];
+    if (!hit) return match;
+    const at = shown.indexOf(hit.url);
+    return at >= 0 ? `[${at + 1}]` : `“${hit.title.length > 50 ? hit.title.slice(0, 49) + "…" : hit.title}”`;
+  });
+}
+
+/** The judge's Devpost picks, with titles and links taken from the real search results. */
+function parseBuiltBefore(raw: { projects?: unknown; twist?: unknown }, devpost: SearchResult[]): BuiltBefore {
+  const used = new Set<number>();
+  const list: { id?: unknown; summary?: unknown; closeness?: unknown }[] = Array.isArray(raw.projects) ? raw.projects : [];
+  const projects = list.flatMap((p) => {
+    const hit = byId(devpost, "D", p?.id, used);
+    if (!hit) return [];
+    const closeness = CLOSENESS.includes(p.closeness as Closeness) ? (p.closeness as Closeness) : "medium";
+    return [{ title: hit.title, url: hit.url, summary: isText(p.summary) ? p.summary.trim() : hit.snippet.slice(0, 160), closeness }];
+  });
+  projects.sort((a, b) => CLOSENESS.indexOf(a.closeness) - CLOSENESS.indexOf(b.closeness));
+  const twist = isText(raw.twist) ? rewriteRefs(raw.twist.trim(), "D", devpost, projects.slice(0, 5).map((p) => p.url)) : "";
+  return { found: projects.length, projects, twist };
+}
+
+/** The judge's closest papers, with titles, authors, years and links taken from arXiv itself. */
+function parsePapers(raw: { closest?: unknown; gap?: unknown; confident?: unknown }, arxiv: SearchResult[]): PaperReport {
+  const used = new Set<number>();
+  const list: { id?: unknown; did?: unknown; missed?: unknown }[] = Array.isArray(raw.closest) ? raw.closest : [];
+  const papers = list
+    .flatMap((p) => {
+      const hit = byId(arxiv, "P", p?.id, used);
+      if (!hit || !isText(p.did)) return [];
+      return [
+        {
+          title: hit.title,
+          url: hit.url,
+          authors: hit.authors ?? [],
+          year: hit.year,
+          did: p.did.trim(),
+          missed: isText(p.missed) ? p.missed.trim() : "",
+        },
+      ];
+    })
+    .slice(0, 5);
+  const gap = isText(raw.gap) ? rewriteRefs(raw.gap.trim(), "P", arxiv, papers.map((p) => p.url)) : "";
+  return { papers, gap, confident: raw.confident === true };
 }
 
 /**
@@ -429,31 +585,27 @@ export async function crossIdeas(
   const user = `Purpose: ${PURPOSES[purpose].label}\n\nOriginal idea:\n${idea}\n\n${describe(parents[0], "A")}\n\n${describe(parents[1], "B")}`;
 
   // Three ideas in one reply, so roughly three times one version's budget.
-  const { text, model } = await callWithFallback(models, system, user, {
-    temperature: 0.9,
-    timeoutMs: 45_000,
-    maxTokens: Math.min(maxTokens * 3, 3600),
-    signal,
-    apiKey,
-  });
-  const obj = extractJSON(text);
-  const list: unknown[] = Array.isArray(obj.offspring) ? obj.offspring : [];
+  const settings = { temperature: 0.9, timeoutMs: 45_000, maxTokens: Math.min(maxTokens * 3, 3600), signal, apiKey };
+  return callAndParse(models, system, user, settings, (text, model) => {
+    const obj = extractJSON(text);
+    const list: unknown[] = Array.isArray(obj.offspring) ? obj.offspring : [];
 
-  const offspring = list.flatMap((raw): OffspringJSON[] => {
-    const o = raw as Record<string, unknown>;
-    const keys = ["title", "pitch", "inherits", ...fields.map((f) => f.key)];
-    if (!keys.every((k) => isText(o[k]))) return [];
-    return [
-      {
-        title: o.title as string,
-        pitch: o.pitch as string,
-        inherits: (o.inherits as string).trim().slice(0, 300),
-        details: Object.fromEntries(fields.map((f) => [f.key, o[f.key] as string])),
-      },
-    ];
+    const offspring = list.flatMap((raw): OffspringJSON[] => {
+      const o = raw as Record<string, unknown>;
+      const keys = ["title", "pitch", "inherits", ...fields.map((f) => f.key)];
+      if (!keys.every((k) => isText(o[k]))) return [];
+      return [
+        {
+          title: o.title as string,
+          pitch: o.pitch as string,
+          inherits: (o.inherits as string).trim().slice(0, 300),
+          details: Object.fromEntries(fields.map((f) => [f.key, o[f.key] as string])),
+        },
+      ];
   });
   if (offspring.length === 0) throw new Error("No usable offspring");
   return { offspring: offspring.slice(0, 3), model };
+  });
 }
 
 const GENERATION_JUDGE_PROMPT = `You are Brainy, a brutally honest judge of ideas. You get a user's original idea and a numbered set of OFFSPRING ideas bred from it. Each says what it inherits from its parents.
@@ -486,19 +638,15 @@ export async function judgeOffspring(
   const user = `Purpose: ${label}\n\nOriginal idea:\n${idea}\n\nOffspring:\n${list}`;
   const system = [GENERATION_JUDGE_PROMPT, style].filter(Boolean).join(" ");
 
-  const { text, model } = await callWithFallback(models, system, user, {
-    temperature: 0.4,
-    timeoutMs: 60_000,
-    maxTokens: 1500,
-    signal,
-    apiKey,
-  });
-  const obj = extractJSON(text);
   const ids = new Set(offspring.map((o) => o.id));
-  const pickId = String(obj.pickId ?? "");
-  if (!ids.has(pickId)) throw new Error("Judge picked an unknown offspring");
-  const notes = (Array.isArray(obj.notes) ? obj.notes : [])
-    .filter((n: { id?: unknown; note?: unknown }) => ids.has(String(n?.id)) && isText(n?.note))
-    .map((n: { id: unknown; note: string }) => ({ id: String(n.id), note: n.note.trim().slice(0, 300) }));
-  return { pickId, why: isText(obj.why) ? obj.why.trim() : "", notes, model };
+  const settings = { temperature: 0.4, timeoutMs: 60_000, maxTokens: 1500, signal, apiKey };
+  return callAndParse(models, system, user, settings, (text, model) => {
+    const obj = extractJSON(text);
+    const pickId = String(obj.pickId ?? "");
+    if (!ids.has(pickId)) throw new Error("Judge picked an unknown offspring");
+    const notes = (Array.isArray(obj.notes) ? obj.notes : [])
+      .filter((n: { id?: unknown; note?: unknown }) => ids.has(String(n?.id)) && isText(n?.note))
+      .map((n: { id: unknown; note: string }) => ({ id: String(n.id), note: n.note.trim().slice(0, 300) }));
+    return { pickId, why: isText(obj.why) ? obj.why.trim() : "", notes, model };
+  });
 }
