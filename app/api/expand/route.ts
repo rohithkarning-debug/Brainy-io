@@ -204,7 +204,7 @@ async function runAll({
   // It never throws: if anything fails we just get fewer (or no) results.
   const sources = PURPOSES[purpose].sources;
   const searchPromise: Promise<{ results: SearchResult[]; report: SearchReport }> = writeSearchQueries(
-    QUERY_MODEL,
+    withFallbacks(QUERY_MODEL),
     idea,
     purpose,
     signal

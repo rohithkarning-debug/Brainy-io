@@ -217,17 +217,19 @@ Respond with ONLY a JSON object, no markdown, in exactly this shape:
 
 /**
  * Ask a cheap model to turn the idea into good search queries.
+ * `models` is tried in order (see callWithFallback).
  * Throws if the reply is unusable.
  */
 export async function writeSearchQueries(
-  model: string,
+  models: string[],
   idea: string,
   purpose: Purpose,
   signal?: AbortSignal
 ): Promise<SearchQueries> {
   const { label, searchHint } = PURPOSES[purpose];
   const user = `Purpose: ${label}. Look for: ${searchHint}.\n\nIdea:\n${idea}`;
-  const obj = extractJSON(await callModel(model, QUERY_PROMPT, user, { temperature: 0.3, timeoutMs: 15_000, maxTokens: 300, signal }));
+  const { text } = await callWithFallback(models, QUERY_PROMPT, user, { temperature: 0.3, timeoutMs: 15_000, maxTokens: 300, signal });
+  const obj = extractJSON(text);
 
   const clean = (list: unknown, max: number) =>
     Array.isArray(list) ? list.filter(isText).map((q) => q.trim().slice(0, 200)).slice(0, max) : [];
