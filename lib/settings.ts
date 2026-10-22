@@ -6,7 +6,7 @@ import { useSyncExternalStore } from "react";
 import { createLocalStore } from "@/lib/local-store";
 import { isLength, isTone, type AnswerLength, type Tone } from "@/lib/style";
 
-export type Theme = "light" | "dark" | "system";
+export type Theme = "light" | "dark";
 export type FontSize = "sm" | "md" | "lg";
 
 export type Settings = {
@@ -18,7 +18,7 @@ export type Settings = {
 };
 
 export const DEFAULT_SETTINGS: Settings = {
-  theme: "system",
+  theme: "light",
   length: "medium",
   tone: "simple",
   fontSize: "md",
@@ -31,7 +31,7 @@ export const SETTINGS_KEY = "brainy:settings";
 function parse(raw: unknown): Settings {
   const s = (raw ?? {}) as Partial<Record<keyof Settings, unknown>>;
   return {
-    theme: s.theme === "light" || s.theme === "dark" ? s.theme : DEFAULT_SETTINGS.theme,
+    theme: s.theme === "dark" ? "dark" : DEFAULT_SETTINGS.theme,
     length: isLength(s.length) ? s.length : DEFAULT_SETTINGS.length,
     tone: isTone(s.tone) ? s.tone : DEFAULT_SETTINGS.tone,
     fontSize: s.fontSize === "sm" || s.fontSize === "lg" ? s.fontSize : DEFAULT_SETTINGS.fontSize,

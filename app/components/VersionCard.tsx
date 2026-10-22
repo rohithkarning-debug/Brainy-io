@@ -7,29 +7,44 @@ import { versionToText } from "@/lib/format";
 import type { Version } from "@/lib/openrouter";
 import { PURPOSES, type Purpose } from "@/lib/purposes";
 
+// Top-border colours that appear on the reveal, one per card in turn.
+const REVEAL_COLORS = ["violet", "pink", "orange", "cyan"];
+
 // One card showing a single version of the idea, with fields for its purpose.
 // `live` = it just arrived from a run, so the pitch types itself out.
+// `picked` = the judge built its pick on this direction; highlighted once cooked.
 export function VersionCard({
   version,
   purpose,
   muted = false,
   live = false,
   detailsOpen = true,
+  colorIndex = 0,
+  picked = false,
 }: {
   version: Version;
   purpose: Purpose;
   muted?: boolean;
   live?: boolean;
   detailsOpen?: boolean;
+  colorIndex?: number;
+  picked?: boolean;
 }) {
   return (
     <article
-      className={`animate-rise-in flex h-full flex-col gap-3 rounded-2xl border p-6 transition duration-200 ${
+      className={`animate-rise-in relative flex h-full flex-col gap-3 rounded-2xl border p-6 transition duration-200 ${
         muted
           ? "border-dashed border-slate-300 bg-slate-50/60"
           : "border-line bg-surface shadow-card hover:-translate-y-1 hover:shadow-lift"
-      }`}
+      } ${picked ? "cooked:ring-2 cooked:ring-accent" : ""}`}
     >
+      {!muted && (
+        <span
+          aria-hidden
+          className="absolute inset-x-0 top-0 h-1 rounded-t-2xl opacity-0 transition-opacity duration-1000 cooked:opacity-100"
+          style={{ background: `var(--color-reveal-${REVEAL_COLORS[colorIndex % REVEAL_COLORS.length]})` }}
+        />
+      )}
       {/* Direction label + model name, actions on the right */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -40,6 +55,11 @@ export function VersionCard({
           >
             {version.direction}
           </span>
+          {picked && (
+            <span className="hidden rounded-full bg-accent px-2.5 py-1 font-semibold text-on-accent cooked:inline-block">
+              Brainy&apos;s pick
+            </span>
+          )}
           <span className="break-all font-mono text-slate-400">{version.model}</span>
         </div>
         <div className="-mr-2 -mt-1 shrink-0">

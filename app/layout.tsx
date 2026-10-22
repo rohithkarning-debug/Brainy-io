@@ -29,8 +29,7 @@ export const metadata: Metadata = {
 // Runs before the page paints so the saved theme, font size and motion
 // setting apply without a flash. Reads the same key as lib/settings.ts.
 const PREFERENCES_SCRIPT = `(function(){try{
-var s=JSON.parse(localStorage.getItem("brainy:settings")||"{}"),d=document.documentElement,t=s.theme||"system";
-var dark=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);
+var s=JSON.parse(localStorage.getItem("brainy:settings")||"{}"),d=document.documentElement,dark=s.theme==="dark";
 d.classList.toggle("dark",dark);d.style.colorScheme=dark?"dark":"light";
 d.dataset.font=s.fontSize||"md";d.dataset.motion=s.animations===false?"off":"on";
 }catch(e){}})()`;

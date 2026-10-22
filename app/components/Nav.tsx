@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Logo } from "@/app/components/Logo";
 import { Icon } from "@/app/components/ui";
 import { UserMenu } from "@/app/components/UserMenu";
+import { useCooked } from "@/lib/reveal";
 
 const LINKS = [
   { href: "/", label: "Home" },
@@ -29,6 +30,7 @@ function isActive(pathname: string, href: string) {
 export function Nav() {
   const pathname = usePathname();
   const router = useRouter();
+  const cooked = useCooked();
   const [open, setOpen] = useState(false);
   const [lastPath, setLastPath] = useState(pathname);
 
@@ -59,7 +61,7 @@ export function Nav() {
     <header className="sticky top-0 z-40 border-b border-line/0 bg-canvas/60 backdrop-blur-lg supports-[backdrop-filter]:bg-canvas/40">
       <nav aria-label="Main" className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
         <Link href="/" aria-label="Brainy home" className="rounded-lg text-slate-950">
-          <Logo />
+          <Logo color={cooked} />
         </Link>
 
         {/* Desktop links */}

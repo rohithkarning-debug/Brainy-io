@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { BrainyTakeCard } from "@/app/components/BrainyTakeCard";
 import { CookingLoader, SkeletonCard } from "@/app/components/CookingLoader";
 import { useCopyShare } from "@/app/components/CopyShare";
@@ -13,7 +13,8 @@ import { formatDate, resultToText, sourceList } from "@/lib/format";
 import { togglePin, useHistory, type Result } from "@/lib/history";
 import { PURPOSES } from "@/lib/purposes";
 import { startRun, stopRun, useRun } from "@/lib/run";
-import { useSettings } from "@/lib/settings";
+import { setCooked } from "@/lib/reveal";
+import { useMotionAllowed, useSettings } from "@/lib/settings";
 import { LENGTHS, TONES } from "@/lib/style";
 
 type Tab = "verdict" | "directions" | "baseline";
@@ -42,6 +43,27 @@ function ResultView({ result, live, pinned, stored }: { result: Result; live: bo
   const cooking = result.status === "cooking";
   const directions = PURPOSES[purpose].directions;
   const hasContent = Boolean(result.baseline || result.versions.length > 0 || result.take);
+
+  // ---------- The reveal: monochrome while cooking, colour once it's done ----------
+  const motion = useMotionAllowed();
+  const finished = !cooking && hasContent;
+  // Opened already finished (from History or Saved): in colour straight away.
+  // A layout effect, so that case never paints a frame in black and white.
+  const [openedFinished] = useState(finished);
+  useLayoutEffect(() => {
+    if (finished) setCooked(true, { animate: !openedFinished });
+  }, [finished, openedFinished]);
+  // Back to black and white on leaving the result.
+  useEffect(() => () => setCooked(false, { animate: false }), []);
+
+  function replayReveal() {
+    setCooked(false, { animate: false });
+    // Wait for the instant switch back to mono to paint, then bloom again.
+    setTimeout(() => setCooked(true), 80);
+  }
+
+  // The direction the judge built its pick on gets highlighted after the reveal.
+  const pickedDirection = result.take?.pick.basedOn.trim().toLowerCase();
 
   // Same idea and purpose, with the current answer settings.
   function regenerate() {
@@ -92,7 +114,9 @@ function ResultView({ result, live, pinned, stored }: { result: Result; live: bo
   ];
 
   return (
-    <div className="pt-8 sm:pt-12">
+    // Frosted panel once cooked, so text stays readable over the colour.
+    // The padding is always there, so nothing shifts when it appears.
+    <div className="-mx-4 mt-6 rounded-[2rem] border border-transparent p-4 transition-colors duration-1000 sm:-mx-8 sm:mt-10 sm:p-8 cooked:border-line cooked:bg-surface/80 cooked:shadow-hero cooked:backdrop-blur-xl">
       {/* ---------- Header: the idea and page actions ---------- */}
       <Link href="/ask" className="text-sm font-medium text-slate-500 transition hover:text-slate-900">
         <span aria-hidden>←</span> New idea
@@ -133,6 +157,11 @@ function ResultView({ result, live, pinned, stored }: { result: Result; live: bo
               Share
             </ActionButton>
           </>
+        )}
+        {finished && motion && (
+          <ActionButton icon="sparkle" onClick={replayReveal}>
+            Replay reveal
+          </ActionButton>
         )}
       </div>
 
@@ -216,10 +245,20 @@ function ResultView({ result, live, pinned, stored }: { result: Result; live: bo
             {/* Cards keep their direction's slot; skeletons fill the ones still cooking.
                 The key on the grid re-opens/closes every card when "all" is toggled. */}
             <div key={String(detailsOpen)} className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              {directions.map((d) => {
+              {directions.map((d, i) => {
                 const version = result.versions.find((v) => v.direction === d.label);
                 if (version) {
-                  return <VersionCard key={d.label} version={version} purpose={purpose} live={live} detailsOpen={detailsOpen} />;
+                  return (
+                    <VersionCard
+                      key={d.label}
+                      version={version}
+                      purpose={purpose}
+                      live={live}
+                      detailsOpen={detailsOpen}
+                      colorIndex={i}
+                      picked={d.label.toLowerCase() === pickedDirection}
+                    />
+                  );
                 }
                 return cooking ? <SkeletonCard key={d.label} label={d.label} /> : null;
               })}
@@ -265,10 +304,10 @@ function NotFound() {
         have been deleted from your history.
       </p>
       <div className="mt-8 flex flex-wrap gap-3">
-        <Link href="/ask" className="rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-accent-dark">
+        <Link href="/ask" className="rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-dark">
           Cook a new idea
         </Link>
-        <Link href="/history" className="rounded-full border border-line bg-surface px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-card">
+        <Link href="/history" className="rounded-full border border-slate-950 bg-surface px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-card">
           Open history
         </Link>
       </div>

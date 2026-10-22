@@ -8,9 +8,8 @@ import { LENGTHS, LENGTH_KEYS, TONES, TONE_KEYS } from "@/lib/style";
 type Choice<T extends string> = { value: T; label: string; hint?: string };
 
 const THEMES: Choice<Theme>[] = [
-  { value: "light", label: "Light" },
+  { value: "light", label: "Light", hint: "Default" },
   { value: "dark", label: "Dark" },
-  { value: "system", label: "System", hint: "Follows your device" },
 ];
 
 const FONT_SIZES: Choice<FontSize>[] = [
@@ -29,7 +28,7 @@ export function SettingsScreen() {
 
   return (
     <div className="mt-8 max-w-3xl space-y-4">
-      <Row title="Theme" description="Light, dark, or match your device.">
+      <Row title="Theme" description="Brainy is light by default. Results still bloom into colour either way.">
         <Segmented name="theme" legend="Theme" choices={THEMES} value={settings.theme} onChange={(v) => set("theme", v)} />
       </Row>
 

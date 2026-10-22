@@ -148,7 +148,7 @@ export function ActionButton({
       ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100/70"
       : pressed
         ? "border-accent/30 bg-accent/10 text-accent"
-        : "border-line bg-surface text-slate-700 hover:border-slate-300 hover:text-slate-950";
+        : "border-slate-950 bg-surface text-slate-950 hover:bg-slate-50";
   return (
     <button
       type="button"

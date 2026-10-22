@@ -136,7 +136,7 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
             <button
               type="submit"
               disabled={!canSend}
-              className="group inline-flex items-center gap-1.5 rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-[0_4px_14px_-4px] shadow-accent/60 transition hover:bg-accent-dark hover:shadow-[0_8px_24px_-6px] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
+              className="group inline-flex items-center gap-1.5 rounded-full bg-accent px-6 py-3 text-sm font-semibold text-on-accent shadow-card transition hover:bg-accent-dark hover:shadow-lift disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
             >
               Expand idea
               <span aria-hidden className="transition-transform group-hover:translate-x-0.5">

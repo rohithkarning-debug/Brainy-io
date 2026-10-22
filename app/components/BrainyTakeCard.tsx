@@ -44,9 +44,14 @@ export function BrainyTakeCard({
   const searched = search.ran.length > 0;
 
   return (
-    // Outer div is a 1px gradient "border" around the inner panel.
-    <section className="rounded-3xl bg-gradient-to-br from-accent/70 via-fuchsia-400/50 to-orange-300/60 p-px shadow-hero">
-      <div className="rounded-[calc(1.5rem-1px)] bg-surface p-6 sm:p-10">
+    // The outer section is a 1px "border" around the inner panel: grey, then
+    // the reveal gradient fades in over it once the result is cooked.
+    <section className="relative rounded-3xl bg-line p-px shadow-hero">
+      <span
+        aria-hidden
+        className="absolute inset-0 rounded-3xl bg-gradient-to-br from-reveal-violet via-reveal-pink to-reveal-orange opacity-0 transition-opacity duration-1000 cooked:opacity-100"
+      />
+      <div className="relative rounded-[calc(1.5rem-1px)] bg-surface p-6 sm:p-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-accent">Brainy&apos;s Take</p>
@@ -62,11 +67,11 @@ export function BrainyTakeCard({
 
         <div className="mt-8 grid gap-8 lg:grid-cols-5 lg:gap-10">
           {/* Left: Brainy's pick, the most prominent part */}
-          <div className="rounded-2xl bg-gradient-to-br from-accent/[0.07] via-fuchsia-500/[0.04] to-transparent p-6 ring-1 ring-accent/15 sm:p-8 lg:col-span-3">
+          <div className="rounded-2xl bg-gradient-to-br from-accent/[0.07] via-reveal-pink/0 to-transparent p-6 ring-1 ring-accent/15 transition-colors duration-1000 cooked:via-reveal-pink/[0.05] sm:p-8 lg:col-span-3">
             <div className="flex flex-wrap items-center gap-2">
               <Label>Brainy&apos;s pick</Label>
               <Tooltip label="The direction this pick builds on">
-                <span tabIndex={0} className="rounded-full bg-accent px-2.5 py-0.5 text-xs font-semibold text-white">
+                <span tabIndex={0} className="rounded-full bg-accent px-2.5 py-0.5 text-xs font-semibold text-on-accent">
                   {take.pick.basedOn}
                 </span>
               </Tooltip>

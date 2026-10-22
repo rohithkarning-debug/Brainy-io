@@ -1,48 +1,76 @@
-﻿@import "tailwindcss";
+@import "tailwindcss";
 
 /* Dark mode follows a `dark` class on <html>, set from Settings (see app/layout.tsx). */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Brainy's light theme: off-white canvas, crisp slate text, one indigo-violet accent.
-   Not `inline`, so the dark theme below can swap these values at runtime. */
+/* "Cooked": set on <html> once a result's verdict is in (lib/reveal.ts).
+   The site is black and white until then; `cooked:` styles are the colour. */
+@custom-variant cooked (&:where([data-cooked="on"], [data-cooked="on"] *));
+
+/* Brainy's light theme: monochrome. White and #fafafa surfaces, near-black text,
+   1px #e5e5e5 borders. The accent is black until a result is cooked.
+   Not `inline`, so the dark theme and the cooked scope below can swap these at runtime. */
 @theme {
-  --color-canvas: #f7f8fb; /* page background */
+  --color-canvas: #fafafa; /* page background */
   --color-surface: #ffffff; /* cards and panels */
-  --color-line: #e4e7ee; /* card borders */
-  --color-accent: #5b47e6; /* the Brainy indigo */
-  --color-accent-dark: #4934d1; /* button hover */
+  --color-line: #e5e5e5; /* card borders */
+  --color-accent: #0a0a0a; /* primary buttons, tags, links */
+  --color-accent-dark: #262626; /* primary button hover */
+  --color-on-accent: #ffffff; /* text on an accent background */
+
+  /* Neutral greys instead of Tailwind's blue-tinted slate. 400 and up pass
+     WCAG AA (4.5:1) as text on white. */
+  --color-slate-50: #fafafa;
+  --color-slate-100: #f5f5f5;
+  --color-slate-200: #e5e5e5;
+  --color-slate-300: #d4d4d4;
+  --color-slate-400: #737373;
+  --color-slate-500: #636363;
+  --color-slate-600: #525252;
+  --color-slate-700: #404040;
+  --color-slate-800: #262626;
+  --color-slate-900: #171717;
+  --color-slate-950: #0a0a0a;
+
+  /* The reveal palette. */
+  --color-reveal-violet: #7c3aed;
+  --color-reveal-pink: #ec4899;
+  --color-reveal-orange: #fb923c;
+  --color-reveal-cyan: #06b6d4;
 }
 
 @theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 
-  /* Soft layered shadows: a tight one for edges plus a wide, faint one for depth. */
-  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px -4px rgb(15 23 42 / 0.06);
-  --shadow-lift: 0 2px 4px rgb(15 23 42 / 0.04), 0 20px 40px -12px rgb(45 40 120 / 0.18);
-  --shadow-hero: 0 4px 8px rgb(15 23 42 / 0.04), 0 40px 80px -24px rgb(70 50 180 / 0.28);
+  /* Soft neutral shadows: a tight one for edges plus a wide, faint one for depth. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px -4px rgb(0 0 0 / 0.06);
+  --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.04), 0 20px 40px -12px rgb(0 0 0 / 0.14);
+  --shadow-hero: 0 4px 8px rgb(0 0 0 / 0.04), 0 40px 80px -24px rgb(0 0 0 / 0.18);
 }
 
-/* Dark theme: a deep ink canvas. The slate scale is flipped (950 = lightest),
-   so every `text-slate-*` / `bg-slate-*` class keeps its role without dark: variants. */
+/* Dark theme (optional, from Settings): near-black canvas, still monochrome.
+   The slate scale is flipped (950 = lightest), so every `text-slate-*` /
+   `bg-slate-*` class keeps its role without dark: variants. */
 .dark {
-  --color-canvas: #0b0d17;
-  --color-surface: #141726;
-  --color-line: #262b40;
-  --color-accent: #6e5df2;
-  --color-accent-dark: #5b47e6;
+  --color-canvas: #0a0a0a;
+  --color-surface: #141414;
+  --color-line: #262626;
+  --color-accent: #fafafa;
+  --color-accent-dark: #d4d4d4;
+  --color-on-accent: #0a0a0a;
 
-  --color-slate-50: #171a2b;
-  --color-slate-100: #1d2134;
-  --color-slate-200: #2a2f46;
-  --color-slate-300: #3a405b;
-  --color-slate-400: #7b829c;
-  --color-slate-500: #939ab2;
-  --color-slate-600: #adb3c7;
-  --color-slate-700: #c6cbda;
-  --color-slate-800: #dce0ea;
-  --color-slate-900: #eceef5;
-  --color-slate-950: #f6f7fb;
+  --color-slate-50: #171717;
+  --color-slate-100: #1c1c1c;
+  --color-slate-200: #2a2a2a;
+  --color-slate-300: #3a3a3a;
+  --color-slate-400: #8c8c8c;
+  --color-slate-500: #a3a3a3;
+  --color-slate-600: #b5b5b5;
+  --color-slate-700: #cccccc;
+  --color-slate-800: #e0e0e0;
+  --color-slate-900: #ededed;
+  --color-slate-950: #fafafa;
 
   /* Status tints: dark backgrounds, light text. */
   --color-emerald-50: #0f2a22;
@@ -56,6 +84,63 @@
   --color-rose-700: #fda4af;
 }
 
+/* ---------- The reveal ---------- */
+
+/* Registered so the accent can animate from black to violet (plain custom
+   properties would just snap). */
+@property --color-accent {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #0a0a0a;
+}
+@property --color-accent-dark {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #262626;
+}
+
+html {
+  transition:
+    --color-accent 1s ease,
+    --color-accent-dark 1s ease;
+}
+
+/* Cooked: the accent turns violet (5.7:1 with white text). */
+html[data-cooked="on"] {
+  --color-accent: #7c3aed;
+  --color-accent-dark: #6d28d9;
+}
+/* In dark mode a lighter violet, with near-black text on it. */
+html.dark[data-cooked="on"] {
+  --color-accent: #a78bfa;
+  --color-accent-dark: #c4b5fd;
+}
+
+/* Opening a finished result, or leaving one: switch without the fade. */
+html[data-reveal="instant"],
+html[data-reveal="instant"] * {
+  transition: none !important;
+}
+
+/* The flowing mesh behind a cooked result: diagonal violet, pink, orange and
+   cyan bands drifting slowly, softened by blurred blobs. */
+@keyframes flow {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
+}
+.reveal-bands {
+  background: linear-gradient(
+    120deg,
+    var(--color-reveal-violet) 0%,
+    var(--color-reveal-pink) 25%,
+    var(--color-reveal-orange) 50%,
+    var(--color-reveal-cyan) 75%,
+    var(--color-reveal-violet) 100%
+  );
+  background-size: 300% 300%;
+  animation: flow 24s ease-in-out infinite alternate;
+}
+
 /* Font size from Settings: everything is in rem, so this scales the whole UI. */
 html[data-font="sm"] {
   font-size: 15px;
@@ -66,7 +151,7 @@ html[data-font="lg"] {
 
 body {
   background: var(--color-canvas);
-  color: var(--color-slate-900);
+  color: var(--color-slate-950);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
@@ -79,7 +164,7 @@ body {
   }
 }
 
-/* Hero mesh: four blurred color blobs drifting slowly around each other. */
+/* Reveal mesh: blurred colour blobs drifting slowly around each other. */
 @keyframes drift-a {
   0%, 100% { transform: translate(0, 0) scale(1); }
   50% { transform: translate(8%, 6%) scale(1.1); }

@@ -30,10 +30,8 @@ export default function Home() {
           Now grounded in live search
         </span>
         <h1 className="mt-6 max-w-4xl text-5xl font-semibold leading-[0.98] tracking-[-0.045em] text-slate-950 sm:text-7xl">
-          Your idea, but{" "}
-          <span className="bg-gradient-to-r from-accent via-fuchsia-500 to-orange-400 bg-clip-text text-transparent">
-            not the obvious
-          </span>{" "}
+          Your idea, but not the{" "}
+          <span className="text-transparent [-webkit-text-stroke:1.5px_var(--color-slate-950)]">obvious</span>{" "}
           version.
         </h1>
         <p className="mt-6 max-w-xl text-lg leading-relaxed text-slate-600">
@@ -44,7 +42,7 @@ export default function Home() {
         <div className="mt-10 flex flex-wrap items-center gap-3">
           <Link
             href="/ask"
-            className="group inline-flex items-center gap-1.5 rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-[0_4px_14px_-4px] shadow-accent/60 transition hover:bg-accent-dark hover:shadow-[0_8px_24px_-6px]"
+            className="group inline-flex items-center gap-1.5 rounded-full bg-accent px-6 py-3 text-sm font-semibold text-on-accent shadow-card transition hover:bg-accent-dark hover:shadow-lift"
           >
             Start cooking
             <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
@@ -53,7 +51,7 @@ export default function Home() {
           </Link>
           <Link
             href="/about"
-            className="inline-flex items-center rounded-full border border-line bg-surface/80 px-6 py-3 text-sm font-semibold text-slate-700 shadow-card backdrop-blur transition hover:text-slate-950"
+            className="inline-flex items-center rounded-full border border-slate-950 bg-surface px-6 py-3 text-sm font-semibold text-slate-950 shadow-card transition hover:bg-slate-50"
           >
             How it works
           </Link>

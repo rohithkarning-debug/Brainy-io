@@ -77,7 +77,7 @@ export default function AboutPage() {
 
       <Link
         href="/ask"
-        className="mt-14 inline-flex items-center gap-1.5 rounded-full bg-accent px-6 py-3 text-sm font-semibold text-white shadow-[0_4px_14px_-4px] shadow-accent/60 transition hover:bg-accent-dark"
+        className="mt-14 inline-flex items-center gap-1.5 rounded-full bg-accent px-6 py-3 text-sm font-semibold text-on-accent shadow-card transition hover:bg-accent-dark"
       >
         Try it <span aria-hidden>→</span>
       </Link>

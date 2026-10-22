@@ -36,7 +36,7 @@ export function CookingLoader({ progress }: { progress: string }) {
   return (
     <div className="flex flex-col items-center gap-5 py-12 text-center">
       <div aria-hidden className="h-1 w-48 overflow-hidden rounded-full bg-slate-200">
-        <div className="animate-sweep h-full w-1/3 rounded-full bg-gradient-to-r from-accent to-fuchsia-500" />
+        <div className="animate-sweep h-full w-1/3 rounded-full bg-slate-950" />
       </div>
       {/* key={index} remounts the line so the fade replays for each one */}
       <p

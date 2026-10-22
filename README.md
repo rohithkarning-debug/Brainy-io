@@ -42,6 +42,9 @@ cap (100). Each OAuth app needs these callback URLs:
 - `lib/run.ts`: reads that stream in the browser and fills in a live result.
 - `lib/history.ts`, `lib/settings.ts`: history, saved results and settings,
   all kept in the visitor's localStorage.
+- `lib/reveal.ts`: "monochrome until it's cooked". The site is black and white;
+  a finished result sets `<html data-cooked>`, which swaps the colour tokens in
+  `app/globals.css` and fades in the gradient mesh and colour logo.
 - `app/components/`: UI. Pages live in `app/<route>/page.tsx`.
 
 ## Scripts
