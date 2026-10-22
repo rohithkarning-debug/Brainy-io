@@ -19,6 +19,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  // Makes the generated social image URL absolute.
+  metadataBase: new URL("https://brainy-io.vercel.app"),
   title: { default: "Brainy", template: "%s · Brainy" },
   description: "Turn a half-baked idea into genuinely different finished versions.",
 };

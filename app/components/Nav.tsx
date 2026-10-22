@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Logo } from "@/app/components/Logo";
 import { Icon } from "@/app/components/ui";
 
 const LINKS = [
@@ -23,7 +24,7 @@ function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
-// Top bar: the gradient mark plus the name, page links, and a hamburger menu on small screens.
+// Top bar: the logo, page links, and a hamburger menu on small screens.
 export function Nav() {
   const pathname = usePathname();
   const router = useRouter();
@@ -56,11 +57,8 @@ export function Nav() {
   return (
     <header className="sticky top-0 z-40 border-b border-line/0 bg-canvas/60 backdrop-blur-lg supports-[backdrop-filter]:bg-canvas/40">
       <nav aria-label="Main" className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
-        <Link href="/" className="flex items-center gap-2.5 rounded-lg">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-accent via-fuchsia-500 to-orange-400 text-sm font-bold text-white shadow-card">
-            b
-          </span>
-          <span className="text-lg font-semibold tracking-tight text-slate-950">brainy</span>
+        <Link href="/" aria-label="Brainy home" className="rounded-lg text-slate-950">
+          <Logo />
         </Link>
 
         {/* Desktop links */}
