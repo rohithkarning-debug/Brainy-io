@@ -8,7 +8,7 @@ import { PurposePicker } from "@/app/components/PurposePicker";
 import { Kbd, Label } from "@/app/components/ui";
 import { formatDate } from "@/lib/format";
 import { useHistory } from "@/lib/history";
-import { MAX_IDEA_LENGTH, RUNS_PER_IP_PER_DAY } from "@/lib/limits";
+import { MAX_IDEA_LENGTH, RUNS_PER_USER_PER_DAY } from "@/lib/limits";
 import { PURPOSES, type Purpose } from "@/lib/purposes";
 import { refreshRemaining, startRun, useRemaining } from "@/lib/run";
 import { useSettings } from "@/lib/settings";
@@ -130,7 +130,7 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
           <div className="flex items-center gap-3">
             {typeof remaining === "number" && (
               <span className="text-xs tabular-nums text-slate-400">
-                {remaining} of {RUNS_PER_IP_PER_DAY} free runs left today
+                {remaining} of {RUNS_PER_USER_PER_DAY} free runs left today
               </span>
             )}
             <button
@@ -149,7 +149,7 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
 
       {remaining === 0 && (
         <p className="mt-6 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">
-          You&apos;ve used your {RUNS_PER_IP_PER_DAY} free runs today, come back tomorrow! Your{" "}
+          You&apos;ve used your {RUNS_PER_USER_PER_DAY} free runs today, come back tomorrow! Your{" "}
           <Link href="/history" className="font-medium underline underline-offset-2">
             history
           </Link>{" "}

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Logo } from "@/app/components/Logo";
 import { Icon } from "@/app/components/ui";
+import { UserMenu } from "@/app/components/UserMenu";
 
 const LINKS = [
   { href: "/", label: "Home" },
@@ -70,17 +71,21 @@ export function Nav() {
           ))}
         </ul>
 
-        {/* Mobile menu button */}
-        <button
-          type="button"
-          aria-label={open ? "Close menu" : "Open menu"}
-          aria-expanded={open}
-          aria-controls="mobile-menu"
-          onClick={() => setOpen((o) => !o)}
-          className="grid h-10 w-10 place-items-center rounded-full border border-line bg-surface/80 text-slate-700 shadow-card md:hidden"
-        >
-          <Icon name={open ? "close" : "menu"} className="h-5 w-5" />
-        </button>
+        <div className="flex items-center gap-2">
+          <UserMenu />
+
+          {/* Mobile menu button */}
+          <button
+            type="button"
+            aria-label={open ? "Close menu" : "Open menu"}
+            aria-expanded={open}
+            aria-controls="mobile-menu"
+            onClick={() => setOpen((o) => !o)}
+            className="grid h-10 w-10 place-items-center rounded-full border border-line bg-surface/80 text-slate-700 shadow-card md:hidden"
+          >
+            <Icon name={open ? "close" : "menu"} className="h-5 w-5" />
+          </button>
+        </div>
       </nav>
 
       {/* Mobile menu panel */}

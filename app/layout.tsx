@@ -1,6 +1,7 @@
-﻿import type { Metadata } from "next";
+import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { SessionProvider } from "next-auth/react";
 import { MeshGradient } from "@/app/components/MeshGradient";
 import { Nav } from "@/app/components/Nav";
 import { SettingsSync } from "@/app/components/SettingsSync";
@@ -46,29 +47,31 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: PREFERENCES_SCRIPT }} />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <ToastProvider>
-          <SettingsSync />
-          {/* overflow-x-clip (not hidden) keeps the blobs in without breaking the sticky nav */}
-          <div className="relative isolate flex min-h-screen flex-col overflow-x-clip">
-            <MeshGradient />
-            <a
-              href="#main"
-              className="sr-only z-50 rounded-full bg-surface px-4 py-2 text-sm font-medium shadow-lift focus:not-sr-only focus:fixed focus:left-4 focus:top-4"
-            >
-              Skip to content
-            </a>
-            <Nav />
-            <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 sm:px-6">
-              {children}
-            </main>
-            <footer className="mx-auto w-full max-w-6xl px-4 pb-8 text-xs text-slate-400 sm:px-6">
-              brainy · 3 models · live search · 1 honest judge ·{" "}
-              <Link href="/about" className="underline-offset-2 hover:text-slate-600 hover:underline">
-                how it works
-              </Link>
-            </footer>
-          </div>
-        </ToastProvider>
+        <SessionProvider>
+          <ToastProvider>
+            <SettingsSync />
+            {/* overflow-x-clip (not hidden) keeps the blobs in without breaking the sticky nav */}
+            <div className="relative isolate flex min-h-screen flex-col overflow-x-clip">
+              <MeshGradient />
+              <a
+                href="#main"
+                className="sr-only z-50 rounded-full bg-surface px-4 py-2 text-sm font-medium shadow-lift focus:not-sr-only focus:fixed focus:left-4 focus:top-4"
+              >
+                Skip to content
+              </a>
+              <Nav />
+              <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 sm:px-6">
+                {children}
+              </main>
+              <footer className="mx-auto w-full max-w-6xl px-4 pb-8 text-xs text-slate-400 sm:px-6">
+                brainy · 3 models · live search · 1 honest judge ·{" "}
+                <Link href="/about" className="underline-offset-2 hover:text-slate-600 hover:underline">
+                  how it works
+                </Link>
+              </footer>
+            </div>
+          </ToastProvider>
+        </SessionProvider>
       </body>
     </html>
   );

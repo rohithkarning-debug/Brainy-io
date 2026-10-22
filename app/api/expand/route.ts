@@ -5,11 +5,14 @@
 // Otherwise: a stream of StreamEvent lines (see lib/stream.ts), each sent as soon
 // as that piece finishes: start -> search / baseline / version (any order) -> take -> done.
 //
+// Signed out: 401 with { error }. Never trust the page to check this.
+//
 // GET /api/expand
-// Returns: { remaining: number | null } (runs this visitor has left today; null = no limits)
+// Returns: { remaining: number | null } (runs this user has left today; null = no limits or signed out)
 
 import { NextResponse } from "next/server";
-import { MAX_IDEA_LENGTH, RUNS_PER_IP_PER_DAY } from "@/lib/limits";
+import { auth } from "@/auth";
+import { MAX_IDEA_LENGTH, RUNS_PER_USER_PER_DAY } from "@/lib/limits";
 import {
   FREE_MODELS,
   generateVersion,
@@ -19,7 +22,7 @@ import {
   type Version,
 } from "@/lib/openrouter";
 import { PURPOSES, isPurpose, type Purpose } from "@/lib/purposes";
-import { checkUsage, consumeRun, getClientIp, type Usage } from "@/lib/ratelimit";
+import { checkUsage, consumeRun, getClientIp, type Usage, type Visitor } from "@/lib/ratelimit";
 import { runSearches, skipAll, type SearchReport, type SearchResult } from "@/lib/search";
 import { STREAM_CONTENT_TYPE, type StreamEvent } from "@/lib/stream";
 import { LENGTHS, isLength, isTone, styleInstruction, type AnswerLength, type Tone } from "@/lib/style";
@@ -70,10 +73,17 @@ const DIRECTION_PREFIX =
   "You are a creative strategist. Turn the user's half-baked idea into a specific, finished concept. Constraint: ";
 
 // Friendly message for each limit (shown as-is in the UI).
-function limitMessage(blockedBy: "ip" | "global") {
-  return blockedBy === "ip"
-    ? `You've used your ${RUNS_PER_IP_PER_DAY} free runs today, come back tomorrow!`
-    : "Brainy has hit its daily limit for everyone. Come back tomorrow!";
+function limitMessage(blockedBy: "user" | "ip" | "global") {
+  if (blockedBy === "user") return `You've used your ${RUNS_PER_USER_PER_DAY} free runs today, come back tomorrow!`;
+  if (blockedBy === "ip") return "Too many runs from this network today. Come back tomorrow!";
+  return "Brainy has hit its daily limit for everyone. Come back tomorrow!";
+}
+
+// The signed-in user and their IP, or null when signed out.
+async function getVisitor(req: Request): Promise<Visitor | null> {
+  const session = await auth();
+  const userId = session?.user?.id;
+  return userId ? { userId, ip: getClientIp(req) } : null;
 }
 
 // Shown if Redis is configured but can't be reached. We refuse the run
@@ -82,7 +92,9 @@ const LIMITS_DOWN = "Brainy can't check usage limits right now. Please try again
 
 export async function GET(req: Request) {
   try {
-    const usage = await checkUsage(getClientIp(req));
+    const visitor = await getVisitor(req);
+    if (!visitor) return NextResponse.json({ remaining: null });
+    const usage = await checkUsage(visitor);
     return NextResponse.json({ remaining: usage.remaining });
   } catch (err) {
     console.warn("Usage check failed:", err instanceof Error ? err.message : err);
@@ -91,6 +103,12 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  // 0. Only signed-in users can run Brainy.
+  const visitor = await getVisitor(req);
+  if (!visitor) {
+    return NextResponse.json({ error: "Please sign in to cook an idea." }, { status: 401 });
+  }
+
   // 1. Read and check the user's idea, purpose and style settings.
   const body = await req.json().catch(() => null);
   const idea = typeof body?.idea === "string" ? body.idea.trim() : "";
@@ -116,7 +134,7 @@ export async function POST(req: Request) {
   // requests don't count. `limitReached` tells the UI to show a friendly note.
   let usage: Usage;
   try {
-    usage = await consumeRun(getClientIp(req));
+    usage = await consumeRun(visitor);
   } catch (err) {
     console.warn("Usage limit check failed:", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: LIMITS_DOWN }, { status: 503 });

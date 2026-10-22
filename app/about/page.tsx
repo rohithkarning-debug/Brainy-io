@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Kbd } from "@/app/components/ui";
-import { RUNS_PER_IP_PER_DAY } from "@/lib/limits";
+import { RUNS_PER_USER_PER_DAY } from "@/lib/limits";
 
 export const metadata: Metadata = { title: "About" };
 
@@ -54,7 +54,7 @@ export default function AboutPage() {
       <section className="mt-14">
         <h2 className="text-2xl font-semibold tracking-[-0.03em] text-slate-950">Good to know</h2>
         <ul className="mt-4 list-disc space-y-2 pl-5 leading-relaxed text-slate-600">
-          <li>Everyone gets {RUNS_PER_IP_PER_DAY} free runs a day. Regenerating counts as a run.</li>
+          <li>Every signed-in account gets {RUNS_PER_USER_PER_DAY} free runs a day. Regenerating counts as a run.</li>
           <li>
             Your history, saved results and settings are stored in this browser only. A result link opens on the
             device that made it.
