@@ -62,11 +62,29 @@ export default function RootLayout({
               <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 sm:px-6">
                 {children}
               </main>
-              <footer className="mx-auto w-full max-w-6xl px-4 pb-8 text-xs text-slate-400 sm:px-6">
-                brainy · 3 models · live search · 1 honest judge ·{" "}
-                <Link href="/about" className="underline-offset-2 hover:text-slate-600 hover:underline">
-                  how it works
-                </Link>
+              <footer className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 pb-8 text-xs text-slate-400 sm:px-6">
+                <p>
+                  brainy · 3 models · live search · 1 honest judge ·{" "}
+                  <Link href="/about" className="underline-offset-2 hover:text-slate-600 hover:underline">
+                    how it works
+                  </Link>
+                </p>
+                <nav aria-label="Footer" className="flex gap-4">
+                  <Link href="/privacy" className="underline-offset-2 hover:text-slate-600 hover:underline">
+                    Privacy
+                  </Link>
+                  <Link href="/terms" className="underline-offset-2 hover:text-slate-600 hover:underline">
+                    Terms
+                  </Link>
+                  <a
+                    href="https://github.com/rohithkarning-debug"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline-offset-2 hover:text-slate-600 hover:underline"
+                  >
+                    GitHub
+                  </a>
+                </nav>
               </footer>
             </div>
           </ToastProvider>

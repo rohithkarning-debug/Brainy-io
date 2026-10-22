@@ -140,7 +140,7 @@ async function execute(id: string, input: RunInput) {
           break;
         case "error":
           finished = true;
-          update(id, () => ({ status: "error", error: event.error }));
+          update(id, () => ({ status: "error", error: event.error, outOfJuice: event.outOfJuice }));
           break;
         case "done":
           finished = true;

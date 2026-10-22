@@ -16,6 +16,7 @@ import { MAX_IDEA_LENGTH, RUNS_PER_USER_PER_DAY } from "@/lib/limits";
 import {
   FREE_MODELS,
   generateVersion,
+  isQuotaError,
   judgeIdea,
   writeSearchQueries,
   type BrainyTake,
@@ -67,6 +68,9 @@ function withFallbacks(model: string, offset = 0): string[] {
 
 // Shown for any server-side problem. Details go to the logs, never to visitors.
 const GENERIC_ERROR = "Something went wrong on our side. Please try again.";
+
+// Shown when every model is out of credits or rate-limited.
+const OUT_OF_JUICE = "Brainy's out of juice for today, try again tomorrow.";
 
 // Shared framing so every direction still produces a concrete, finished concept.
 const DIRECTION_PREFIX =
@@ -278,7 +282,11 @@ async function runAll({
 
   if (!baseline && versions.length === 0) {
     console.warn("All models failed");
-    send({ type: "error", error: GENERIC_ERROR });
+    // Every call ran out of credits or hit a rate limit: a friendlier note than a generic error.
+    const outOfJuice = [baselineResult, ...directionResults].every(
+      (r) => r.status === "rejected" && isQuotaError(r.reason)
+    );
+    send(outOfJuice ? { type: "error", error: OUT_OF_JUICE, outOfJuice } : { type: "error", error: GENERIC_ERROR });
     return;
   }
 

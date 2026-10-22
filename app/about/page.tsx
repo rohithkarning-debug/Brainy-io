@@ -20,7 +20,7 @@ const STEPS = [
   },
   {
     title: "One honest judge",
-    body: "A stronger model reads every version and the search results, rates how crowded the space is, and picks the most unique idea that could still work.",
+    body: "A separate judge model reads every version and the search results, rates how crowded the space is, and picks the most unique idea that could still work.",
   },
 ];
 

@@ -26,6 +26,7 @@ export type Result = {
   search: SearchReport | null;
   error?: string;
   limited?: boolean; // the run was refused by the daily limit
+  outOfJuice?: boolean; // every model was out of credits or rate-limited
   pinned?: boolean; // shown on the Saved page; survives "Clear history"
 };
 

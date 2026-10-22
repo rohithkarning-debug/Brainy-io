@@ -2,18 +2,20 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { Logo } from "@/app/components/Logo";
 import { Icon } from "@/app/components/ui";
 import { UserMenu } from "@/app/components/UserMenu";
 import { useCooked } from "@/lib/reveal";
 
+// `private` links only show when signed in; signed-out visitors get "Sign in" instead (UserMenu).
 const LINKS = [
   { href: "/", label: "Home" },
   { href: "/ask", label: "Ask" },
-  { href: "/history", label: "History" },
-  { href: "/saved", label: "Saved" },
-  { href: "/settings", label: "Settings" },
+  { href: "/history", label: "History", private: true },
+  { href: "/saved", label: "Saved", private: true },
+  { href: "/settings", label: "Settings", private: true },
   { href: "/about", label: "About" },
 ];
 
@@ -31,6 +33,8 @@ export function Nav() {
   const pathname = usePathname();
   const router = useRouter();
   const cooked = useCooked();
+  const signedIn = useSession().status === "authenticated";
+  const links = LINKS.filter((link) => signedIn || !link.private);
   const [open, setOpen] = useState(false);
   const [lastPath, setLastPath] = useState(pathname);
 
@@ -66,9 +70,9 @@ export function Nav() {
 
         {/* Desktop links */}
         <ul className="hidden items-center gap-1 rounded-full border border-surface/70 bg-surface/60 p-1 shadow-card backdrop-blur md:flex">
-          {LINKS.map((link) => (
-            <li key={link.href}>
-              <NavLink {...link} active={isActive(pathname, link.href)} />
+          {links.map(({ href, label }) => (
+            <li key={href}>
+              <NavLink href={href} label={label} active={isActive(pathname, href)} />
             </li>
           ))}
         </ul>
@@ -94,9 +98,9 @@ export function Nav() {
       {open && (
         <div id="mobile-menu" className="animate-page-in border-t border-line bg-surface/95 px-4 pb-4 pt-2 shadow-lift backdrop-blur md:hidden">
           <ul className="flex flex-col gap-1">
-            {LINKS.map((link) => (
-              <li key={link.href}>
-                <NavLink {...link} active={isActive(pathname, link.href)} block />
+            {links.map(({ href, label }) => (
+              <li key={href}>
+                <NavLink href={href} label={label} active={isActive(pathname, href)} block />
               </li>
             ))}
           </ul>

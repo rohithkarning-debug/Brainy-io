@@ -11,7 +11,7 @@ export type StreamEvent =
   | { type: "baseline"; version: Version }
   | { type: "version"; version: Version } // one direction finished (any order)
   | { type: "take"; take: BrainyTake | null } // null = the judge failed
-  | { type: "error"; error: string } // fatal: nothing more is coming
+  | { type: "error"; error: string; outOfJuice?: boolean } // fatal: nothing more is coming; outOfJuice = every model hit its quota
   | { type: "done" };
 
 export const STREAM_CONTENT_TYPE = "application/x-ndjson";

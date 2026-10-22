@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signIn } from "@/auth";
 import { LogoMark } from "@/app/components/Logo";
@@ -76,8 +77,18 @@ export default async function LoginPage({
         </form>
       </div>
 
-      <p className="mt-6 text-xs text-slate-400">
-        We only read your name, email and avatar. Your ideas stay in this browser.
+      <p className="mt-6 text-xs leading-relaxed text-slate-400">
+        We only read your name, email and avatar. Your history stays in this browser. Ideas are sent to AI and
+        search providers only to generate results.
+      </p>
+      <p className="mt-3 text-xs text-slate-400">
+        <Link href="/privacy" className="underline underline-offset-2 hover:text-slate-600">
+          Privacy
+        </Link>{" "}
+        ·{" "}
+        <Link href="/terms" className="underline underline-offset-2 hover:text-slate-600">
+          Terms
+        </Link>
       </p>
     </div>
   );

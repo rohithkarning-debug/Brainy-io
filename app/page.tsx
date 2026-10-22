@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Kbd } from "@/app/components/ui";
+import { ExampleResult } from "@/app/components/ExampleResult";
+import { Kbd, SectionTitle } from "@/app/components/ui";
 
 // What a run does, in three cards under the hero.
 const FEATURES = [
@@ -16,7 +17,7 @@ const FEATURES = [
   {
     eyebrow: "1 honest judge",
     title: "A verdict, not a pep talk",
-    body: "A stronger model reads everything and tells you how crowded the space is, and which direction is worth chasing.",
+    body: "A separate judge model reads everything and tells you how crowded the space is, and which direction is worth chasing.",
   },
 ];
 
@@ -55,7 +56,8 @@ export default function Home() {
           >
             How it works
           </Link>
-          <span className="hidden text-xs text-slate-400 sm:inline">
+          {/* Keyboard hint: hidden on phones and other touch-first devices */}
+          <span className="hidden text-xs text-slate-400 sm:inline [@media(pointer:coarse)]:hidden">
             or press <Kbd>Ctrl</Kbd> <Kbd>K</Kbd> anywhere
           </span>
         </div>
@@ -74,6 +76,26 @@ export default function Home() {
             <p className="mt-2 leading-relaxed text-slate-600">{f.body}</p>
           </article>
         ))}
+      </section>
+
+      {/* ---------- A finished sample, so visitors see the result before signing in ---------- */}
+      <section aria-labelledby="example-heading" className="mt-24">
+        <div id="example-heading">
+          <SectionTitle eyebrow="See an example" title="One idea, fully cooked" />
+        </div>
+        <p className="-mt-3 max-w-xl leading-relaxed text-slate-600">
+          A real-shaped run for a startup idea: the verdict, nine directions and the plain baseline. Click through
+          the tabs.
+        </p>
+        <ExampleResult />
+        <div className="mt-8 flex justify-center">
+          <Link
+            href="/ask"
+            className="inline-flex items-center gap-1.5 rounded-full bg-accent px-6 py-3 text-sm font-semibold text-on-accent shadow-card transition hover:bg-accent-dark hover:shadow-lift"
+          >
+            Cook your own idea <span aria-hidden>→</span>
+          </Link>
+        </div>
       </section>
     </>
   );

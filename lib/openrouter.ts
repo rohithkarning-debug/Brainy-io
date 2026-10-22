@@ -75,6 +75,11 @@ class HttpError extends Error {
   }
 }
 
+/** True if a call failed because the model was out of credits or rate-limited (402/429). */
+export function isQuotaError(err: unknown): boolean {
+  return err instanceof HttpError && (err.status === 402 || err.status === 429);
+}
+
 type CallSettings = { temperature?: number; timeoutMs?: number; maxTokens?: number; signal?: AbortSignal };
 
 /**

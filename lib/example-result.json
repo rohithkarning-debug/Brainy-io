@@ -1,0 +1,167 @@
+{
+  "id": "example",
+  "createdAt": 1792540800000,
+  "idea": "An app that tells you what to cook with what's already in your fridge, before it goes off.",
+  "purpose": "startup",
+  "length": "medium",
+  "tone": "simple",
+  "status": "done",
+  "baseline": {
+    "direction": "Baseline",
+    "model": "openai/gpt-4o-mini",
+    "title": "FridgeChef",
+    "pitch": "Snap a photo of your fridge and get recipe ideas that use what you already have.",
+    "details": {
+      "targetCustomer": "Busy home cooks who want to waste less food.",
+      "revenueModel": "Freemium app with a monthly subscription for meal plans and extra recipes.",
+      "competition": "Supercook, Too Good To Go and recipe apps; FridgeChef stands out with photo recognition."
+    }
+  },
+  "versions": [
+    {
+      "direction": "Different customer",
+      "model": "google/gemini-2.5-flash-lite",
+      "title": "Shelf Life for Shared Houses",
+      "pitch": "A shared fridge log for student houses that suggests group dinners from whatever's about to expire.",
+      "details": {
+        "targetCustomer": "Students and young renters in shared houses of 3-6 people.",
+        "revenueModel": "Free for houses; paid placements from student grocery delivery services.",
+        "competition": "Splitwise and group chats handle money, not food; nobody coordinates the shared fridge."
+      }
+    },
+    {
+      "direction": "Opposite market",
+      "model": "openai/gpt-4o-mini",
+      "title": "LastBite Kitchens",
+      "pitch": "A back-of-house tool that turns a restaurant's near-expiry stock into tomorrow's specials.",
+      "details": {
+        "targetCustomer": "Independent restaurants and cafés with 10-50 covers.",
+        "revenueModel": "Monthly subscription per location, priced against the food it saves.",
+        "competition": "Inventory tools like MarketMan track stock but don't suggest what to cook with it."
+      }
+    },
+    {
+      "direction": "B2B",
+      "model": "meta-llama/llama-3.3-70b-instruct",
+      "title": "Expiry API",
+      "pitch": "An API that grocery apps plug in to suggest recipes from a customer's recent orders before items spoil.",
+      "details": {
+        "targetCustomer": "Grocery delivery apps and supermarket loyalty programmes.",
+        "revenueModel": "Per-call pricing with an annual enterprise tier.",
+        "competition": "Grocers build basic recipe pages in-house; none link them to what the customer actually owns."
+      }
+    },
+    {
+      "direction": "Consumer",
+      "model": "google/gemini-2.5-flash-lite",
+      "title": "Use It Up",
+      "pitch": "A daily nudge that names one ingredient about to go off and gives you a 15-minute recipe for it.",
+      "details": {
+        "targetCustomer": "Busy professionals who shop weekly and bin food on Sunday.",
+        "revenueModel": "One-off app purchase, plus affiliate links for the odd missing ingredient.",
+        "competition": "Recipe apps start from the dish; Use It Up starts from the thing that's about to spoil."
+      }
+    },
+    {
+      "direction": "Physical",
+      "model": "openai/gpt-4o-mini",
+      "title": "The Eat-Me-First Shelf",
+      "pitch": "A smart fridge shelf with weight sensors that lights up when food has sat too long, with recipes on a tiny e-ink tag.",
+      "details": {
+        "targetCustomer": "Gadget-friendly households who already own smart home devices.",
+        "revenueModel": "Hardware sale at around $79, with optional recipe packs.",
+        "competition": "Smart fridges cost thousands; this retrofits any fridge."
+      }
+    },
+    {
+      "direction": "Digital-only",
+      "model": "meta-llama/llama-3.3-70b-instruct",
+      "title": "Receipt to Recipe",
+      "pitch": "Forward your grocery receipt email and get a week of meals planned around what you bought, in spoil order.",
+      "details": {
+        "targetCustomer": "People who already shop online and hate meal planning.",
+        "revenueModel": "Subscription at $3 a month after a free month.",
+        "competition": "Meal kits plan for you but sell the food; this plans around food you already have."
+      }
+    },
+    {
+      "direction": "Cheap",
+      "model": "google/gemini-2.5-flash-lite",
+      "title": "Fridge SMS",
+      "pitch": "Text what's in your fridge to a number and get back three cheap meals, no app or smartphone needed.",
+      "details": {
+        "targetCustomer": "Low-income households and older people without smartphones.",
+        "revenueModel": "Funded by food banks and councils with food-waste targets.",
+        "competition": "Every rival is an app; SMS reaches the people apps miss."
+      }
+    },
+    {
+      "direction": "Premium",
+      "model": "openai/gpt-4o-mini",
+      "title": "Zero-Waste Private Chef",
+      "pitch": "A chef visits weekly, cooks from what's in your fridge, and leaves labelled meals for the days ahead.",
+      "details": {
+        "targetCustomer": "Affluent families who care about sustainability and lack time.",
+        "revenueModel": "Weekly service fee, around $150 per visit.",
+        "competition": "Private chefs shop fresh for every visit; this one sells the zero-waste promise."
+      }
+    },
+    {
+      "direction": "Inverted assumption",
+      "model": "meta-llama/llama-3.3-70b-instruct",
+      "title": "Shop Less",
+      "pitch": "Instead of rescuing food once it's bought, it stops you buying it: a shopping list that cuts what you won't use in time.",
+      "details": {
+        "targetCustomer": "Households that throw away a bag of food every week.",
+        "revenueModel": "Subscription, pitched as paying for itself in groceries you don't buy.",
+        "competition": "Leftover-recipe apps fix the problem after the fact; this one prevents it."
+      }
+    }
+  ],
+  "take": {
+    "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "saturation": "Crowded",
+    "saturationReason": "Cooking from what's in your fridge is a well-worn idea: several recipe-by-ingredient apps and food-waste apps already exist. Preventing waste at the shopping stage is far less covered.",
+    "similarExisting": [
+      {
+        "title": "Supercook",
+        "note": "Finds recipes from the ingredients you tick off as already owned.",
+        "url": "https://www.supercook.com",
+        "source": "web"
+      },
+      {
+        "title": "Too Good To Go",
+        "note": "Tackles food waste, but on the shop side, selling leftover food cheaply.",
+        "url": "https://www.toogoodtogo.com",
+        "source": "web"
+      },
+      {
+        "title": "Olio",
+        "note": "Lets neighbours give away food they won't use in time.",
+        "url": "https://olioapp.com",
+        "source": "web"
+      }
+    ],
+    "pick": {
+      "title": "Shop Less",
+      "pitch": "A shopping list that learns what you actually eat and trims what you'd throw away, before you buy it.",
+      "basedOn": "Inverted assumption",
+      "why": "Every rival rescues food after it's in the fridge. Stopping the waste at the till is simpler to build, easy to measure in money saved, and nobody owns it yet."
+    },
+    "alternatives": [
+      {
+        "title": "Fridge SMS",
+        "pitch": "Text-message meal ideas for households without smartphones, funded by councils with waste targets."
+      },
+      {
+        "title": "LastBite Kitchens",
+        "pitch": "Turn a restaurant's near-expiry stock into tomorrow's specials."
+      }
+    ],
+    "followUps": [
+      "A browser extension that flags overbuying in online grocery baskets",
+      "A council-run food-waste challenge with household leaderboards"
+    ]
+  },
+  "search": { "ran": ["web"], "skipped": [] }
+}

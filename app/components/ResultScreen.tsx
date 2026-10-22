@@ -31,7 +31,23 @@ export function ResultScreen({ id }: { id: string }) {
   return <ResultView key={id} result={result} live={live !== null} pinned={saved?.pinned ?? false} stored={saved !== null} />;
 }
 
-function ResultView({ result, live, pinned, stored }: { result: Result; live: boolean; pinned: boolean; stored: boolean }) {
+/**
+ * One result with its tabs. `example` is the static sample on the home page:
+ * no page actions, and the page around it handles the colour reveal.
+ */
+export function ResultView({
+  result,
+  live = false,
+  pinned = false,
+  stored = false,
+  example = false,
+}: {
+  result: Result;
+  live?: boolean;
+  pinned?: boolean;
+  stored?: boolean;
+  example?: boolean;
+}) {
   const router = useRouter();
   const toast = useToast();
   const { copy, share } = useCopyShare();
@@ -51,8 +67,8 @@ function ResultView({ result, live, pinned, stored }: { result: Result; live: bo
   // A layout effect, so that case never paints a frame in black and white.
   const [openedFinished] = useState(finished);
   useLayoutEffect(() => {
-    if (finished) setCooked(true, { animate: !openedFinished });
-  }, [finished, openedFinished]);
+    if (finished && !example) setCooked(true, { animate: !openedFinished });
+  }, [finished, openedFinished, example]);
   // Back to black and white on leaving the result.
   useEffect(() => () => setCooked(false, { animate: false }), []);
 
@@ -113,39 +129,43 @@ function ResultView({ result, live, pinned, stored }: { result: Result; live: bo
     { id: "baseline", label: "Baseline" },
   ];
 
+  const Heading = example ? "h3" : "h1";
+
   return (
     // Frosted panel once cooked, so text stays readable over the colour.
     // The padding is always there, so nothing shifts when it appears.
     <div className="-mx-4 mt-6 rounded-[2rem] border border-transparent p-4 transition-colors duration-1000 sm:-mx-8 sm:mt-10 sm:p-8 cooked:border-line cooked:bg-surface/80 cooked:shadow-hero cooked:backdrop-blur-xl">
       {/* ---------- Header: the idea and page actions ---------- */}
-      <Link href="/ask" className="text-sm font-medium text-slate-500 transition hover:text-slate-900">
-        <span aria-hidden>←</span> New idea
-      </Link>
-      <div className="mt-5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+      {!example && (
+        <Link href="/ask" className="mb-5 inline-block text-sm font-medium text-slate-500 transition hover:text-slate-900">
+          <span aria-hidden>←</span> New idea
+        </Link>
+      )}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span className="rounded-full bg-accent/10 px-2.5 py-1 font-semibold text-accent">{PURPOSES[purpose].label}</span>
-        <span>{formatDate(result.createdAt)}</span>
+        <span>{example ? "Sample run" : formatDate(result.createdAt)}</span>
         <span aria-hidden>·</span>
         <span>
           {LENGTHS[result.length].label}, {TONES[result.tone].label.toLowerCase()}
         </span>
       </div>
-      <h1 className="mt-3 line-clamp-4 max-w-4xl text-2xl font-semibold leading-snug tracking-[-0.03em] text-slate-950 sm:text-3xl">
+      <Heading className="mt-3 line-clamp-4 max-w-4xl text-2xl font-semibold leading-snug tracking-[-0.03em] text-slate-950 sm:text-3xl">
         {result.idea}
-      </h1>
+      </Heading>
 
       <div className="mt-6 flex flex-wrap gap-2">
-        {cooking ? (
+        {example ? null : cooking ? (
           <ActionButton icon="stop" variant="danger" onClick={() => stopRun(result.id)}>
             Stop generating
           </ActionButton>
         ) : (
-          !result.limited && (
+          !result.limited && !result.outOfJuice && (
             <ActionButton icon="refresh" onClick={regenerate}>
               Regenerate
             </ActionButton>
           )
         )}
-        {hasContent && (
+        {hasContent && !example && (
           <>
             <ActionButton icon="bookmark" pressed={pinned} disabled={!stored} onClick={pin}>
               {pinned ? "Saved" : "Save"}
@@ -165,9 +185,11 @@ function ResultView({ result, live, pinned, stored }: { result: Result; live: bo
         )}
       </div>
 
-      {/* ---------- Notes: limit, error, stopped ---------- */}
+      {/* ---------- Notes: limit, out of juice, error, stopped ---------- */}
       {result.limited ? (
         <p className="mt-8 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">{result.error}</p>
+      ) : result.outOfJuice ? (
+        <OutOfJuice />
       ) : result.status === "error" ? (
         <div role="alert" className="mt-8 flex max-w-3xl flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-700">
           <p>
@@ -279,6 +301,26 @@ function ResultView({ result, live, pinned, stored }: { result: Result; live: bo
           </TabPanel>
         </div>
       )}
+    </div>
+  );
+}
+
+// Every model was out of credits or rate-limited: nothing to retry until tomorrow.
+function OutOfJuice() {
+  return (
+    <div role="status" className="mt-8 max-w-3xl rounded-2xl border border-line bg-surface p-6 shadow-card sm:p-8">
+      <p aria-hidden className="text-4xl">🪫</p>
+      <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-950">Brainy&apos;s out of juice for today</h2>
+      <p className="mt-2 leading-relaxed text-slate-600">
+        The AI models behind Brainy have used up today&apos;s allowance. Try again tomorrow, your idea will still be
+        half-baked and waiting.
+      </p>
+      <Link
+        href="/"
+        className="mt-6 inline-flex rounded-full border border-slate-950 bg-surface px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-card transition hover:bg-slate-50"
+      >
+        Back home
+      </Link>
     </div>
   );
 }
