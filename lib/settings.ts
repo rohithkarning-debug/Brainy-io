@@ -73,12 +73,25 @@ export function useSettings(): Settings {
 /** Current settings, for event handlers (not for rendering). */
 export const getSettings = store.get;
 
+// Cloud sync (lib/sync.ts) hears about every change made in this browser.
+let onChange: ((settings: Settings) => void) | null = null;
+export function onSettingsChange(listener: ((settings: Settings) => void) | null) {
+  onChange = listener;
+}
+
 export function updateSettings(patch: Partial<Settings>) {
   store.set({ ...store.get(), ...patch });
+  onChange?.(store.get());
 }
 
 export function resetSettings() {
   store.set(DEFAULT_SETTINGS);
+  onChange?.(DEFAULT_SETTINGS);
+}
+
+/** Settings from the cloud copy: checked like stored ones, and not reported back. */
+export function applyRemoteSettings(raw: unknown) {
+  store.set(parse(raw));
 }
 
 // True when the OS asks for less motion.

@@ -141,8 +141,12 @@ export default function AboutPage() {
             . It stays in this browser, and runs on it don&apos;t touch your free runs or the shared tank.
           </li>
           <li>
-            Your history, saved results, family trees, settings and keys are stored in this browser only. A result
-            link opens on the device that made it.
+            Your history, saved results, family trees and settings stay in this browser unless you turn on{" "}
+            <Link href="/settings#sync" className="font-medium text-slate-950 underline underline-offset-2">
+              sync
+            </Link>
+            , which keeps a copy on your account so they follow you to other devices. You can also make a synced
+            result public as a read-only link. Your API keys never leave this browser.
           </li>
           <li>The verdict is an informed opinion, not a market study. Do your own check before betting on it.</li>
         </ul>

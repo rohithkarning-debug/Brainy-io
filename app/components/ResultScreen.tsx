@@ -20,6 +20,7 @@ import { directionNodeId, readLineage, type Lineage, type NodeId } from "@/lib/l
 import { useModels } from "@/lib/models";
 import { PURPOSES } from "@/lib/purposes";
 import { rejudge, startRun, stopRun, useRun } from "@/lib/run";
+import { setPublic, useSync } from "@/lib/sync";
 import { setCooked } from "@/lib/reveal";
 import { runOptions, updateSettings, useMotionAllowed, useSettings } from "@/lib/settings";
 import { LENGTHS, TONES } from "@/lib/style";
@@ -44,6 +45,7 @@ export function ResultScreen({ id }: { id: string }) {
       pinned={saved?.pinned ?? false}
       stored={saved !== null}
       lineage={saved?.lineage}
+      shareSlug={saved?.shareSlug}
     />
   );
 }
@@ -51,6 +53,8 @@ export function ResultScreen({ id }: { id: string }) {
 /**
  * One result with its tabs. `example` is the static sample on the home page:
  * no page actions, and it never turns the page to colour (that is only for real results).
+ * `shared` is a public result at /r/[slug]: read-only, but a real cooked
+ * result, so it shows in colour.
  */
 export function ResultView({
   result,
@@ -58,20 +62,27 @@ export function ResultView({
   pinned = false,
   stored = false,
   example = false,
+  shared = false,
   lineage: storedLineage,
+  shareSlug,
 }: {
   result: Result;
   live?: boolean;
   pinned?: boolean;
   stored?: boolean;
   example?: boolean;
+  shared?: boolean;
   lineage?: Lineage;
+  shareSlug?: string;
 }) {
+  const readOnly = example || shared;
   const router = useRouter();
   const toast = useToast();
   const { copy, share } = useCopyShare();
   const settings = useSettings();
   const hasOwnKey = Boolean(useKeys().openrouter);
+  const sync = useSync();
+  const [publishing, setPublishing] = useState(false);
   const [tab, setTab] = useState<Tab>("verdict");
   const [detailsOpen, setDetailsOpen] = useState(true);
 
@@ -144,6 +155,25 @@ export function ResultView({
     router.push(`/result/${id}`);
   }
 
+  // Public link at /r/<slug>: only for synced results (the page reads the cloud copy).
+  const publicUrl = shareSlug ? `${typeof location === "undefined" ? "" : location.origin}/r/${shareSlug}` : null;
+  async function togglePublic() {
+    setPublishing(true);
+    try {
+      const slug = await setPublic(result.id, !shareSlug);
+      if (slug) {
+        await navigator.clipboard?.writeText(`${location.origin}/r/${slug}`).catch(() => {});
+        toast("Public link copied");
+      } else {
+        toast("This result is private again");
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Couldn't change sharing");
+    } finally {
+      setPublishing(false);
+    }
+  }
+
   function pin() {
     toast(togglePin(result.id) ? "Saved to favorites" : "Removed from saved");
   }
@@ -208,10 +238,19 @@ export function ResultView({
     // The padding is always there, so nothing shifts when it appears.
     <div className="-mx-4 mt-6 rounded-[2rem] border border-transparent p-4 transition-colors duration-1000 sm:-mx-8 sm:mt-10 sm:p-8 cooked:border-line cooked:bg-surface/80 cooked:shadow-hero cooked:backdrop-blur-xl">
       {/* ---------- Header: the idea and page actions ---------- */}
-      {!example && (
-        <Link href="/ask" className="mb-5 inline-block text-sm font-medium text-slate-500 transition hover:text-slate-900">
-          <span aria-hidden>←</span> New idea
-        </Link>
+      {shared ? (
+        <p className="mb-5 text-sm text-slate-500">
+          A shared Brainy result, read-only.{" "}
+          <Link href="/ask" className="font-medium text-slate-950 underline underline-offset-2">
+            Cook your own idea <span aria-hidden>→</span>
+          </Link>
+        </p>
+      ) : (
+        !example && (
+          <Link href="/ask" className="mb-5 inline-block text-sm font-medium text-slate-500 transition hover:text-slate-900">
+            <span aria-hidden>←</span> New idea
+          </Link>
+        )
       )}
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span className="rounded-full bg-accent/10 px-2.5 py-1 font-semibold text-accent">{PURPOSES[purpose].label}</span>
@@ -226,7 +265,7 @@ export function ResultView({
       </Heading>
 
       <div className="mt-6 flex flex-wrap gap-2">
-        {example ? null : cooking ? (
+        {readOnly ? null : cooking ? (
           <ActionButton icon="stop" variant="danger" onClick={() => stopRun(result.id)}>
             Stop generating
           </ActionButton>
@@ -238,7 +277,12 @@ export function ResultView({
             </ActionButton>
           )
         )}
-        {hasContent && !example && (
+        {shared && hasContent && (
+          <ActionButton icon="copy" onClick={() => copy(resultToText(result))}>
+            Copy all
+          </ActionButton>
+        )}
+        {hasContent && !readOnly && (
           <>
             <ActionButton icon="bookmark" pressed={pinned} disabled={!stored} onClick={pin}>
               {pinned ? "Saved" : "Save"}
@@ -251,12 +295,26 @@ export function ResultView({
             </ActionButton>
           </>
         )}
+        {finished && stored && !readOnly && sync.enabled && (
+          <ActionButton icon="link" pressed={Boolean(shareSlug)} disabled={publishing} onClick={() => void togglePublic()}>
+            {publishing ? "Updating…" : shareSlug ? "Public" : "Make public"}
+          </ActionButton>
+        )}
         {finished && motion && !example && (
           <ActionButton icon="sparkle" onClick={replayReveal}>
             Replay reveal
           </ActionButton>
         )}
       </div>
+      {publicUrl && !readOnly && sync.enabled && (
+        <p className="mt-3 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
+          Anyone with the link can view this result:
+          <a href={publicUrl} target="_blank" rel="noreferrer" className="font-mono text-slate-700 underline underline-offset-2">
+            {publicUrl.replace(/^https?:\/\//, "")}
+          </a>
+          · press <strong className="font-medium">Public</strong> to make it private again.
+        </p>
+      )}
 
       {/* ---------- Notes: limit, out of juice, error, stopped ---------- */}
       {result.limited || result.keyProblem ? (
@@ -334,7 +392,7 @@ export function ResultView({
                     ? "Brainy's Take couldn't be generated this time, but the directions are ready."
                     : "The run ended before the judge could weigh in, but the directions that arrived are ready."}
                 </p>
-                {!example && hasContent && <RejudgeBox result={result} ownKey={hasOwnKey} />}
+                {!readOnly && hasContent && <RejudgeBox result={result} ownKey={hasOwnKey} />}
               </div>
             )}
           </TabPanel>
@@ -549,7 +607,8 @@ function NotFound() {
       <p className="text-sm font-semibold text-accent">Result not found</p>
       <h1 className="mt-1 text-3xl font-semibold tracking-[-0.03em] text-slate-950">This dish isn&apos;t in your kitchen</h1>
       <p className="mt-4 leading-relaxed text-slate-600">
-        Results are kept in the browser that made them, so a result link only opens on that device. It may also
+        Results are kept in the browser that made them (or on every device, with sync on in Settings), so a
+        result link only opens where it&apos;s stored. It may also
         have been deleted from your history.
       </p>
       <div className="mt-8 flex flex-wrap gap-3">

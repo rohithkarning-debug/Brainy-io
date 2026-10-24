@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { SessionProvider } from "next-auth/react";
+import { CloudSync } from "@/app/components/CloudSync";
 import { MeshGradient } from "@/app/components/MeshGradient";
 import { Nav } from "@/app/components/Nav";
 import { SettingsSync } from "@/app/components/SettingsSync";
@@ -49,6 +50,7 @@ export default function RootLayout({
         <SessionProvider>
           <ToastProvider>
             <SettingsSync />
+            <CloudSync />
             {/* overflow-x-clip (not hidden) keeps the blobs in without breaking the sticky nav */}
             <div className="relative isolate flex min-h-screen flex-col overflow-x-clip">
               <MeshGradient />

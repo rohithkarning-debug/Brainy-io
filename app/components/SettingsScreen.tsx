@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { ApiKeys } from "@/app/components/ApiKeys";
+import { DeleteMyData, SyncSettings } from "@/app/components/SyncSettings";
 import { useToast } from "@/app/components/Toast";
 import { Segmented, Switch, type Choice } from "@/app/components/ui";
 import { useKeys } from "@/lib/keys";
@@ -97,6 +98,8 @@ export function SettingsScreen() {
         </div>
       </Row>
 
+      <SyncSettings />
+
       <ApiKeys />
 
       <div className="pt-4">
@@ -111,6 +114,8 @@ export function SettingsScreen() {
           Reset to defaults
         </button>
       </div>
+
+      <DeleteMyData />
     </div>
   );
 }

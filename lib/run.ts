@@ -131,7 +131,7 @@ function setRemaining(value: number | null, out?: boolean, shared?: number | nul
 /** Ask the server how many runs this visitor has left today. */
 export async function refreshRemaining() {
   try {
-    const res = await fetch("/api/expand");
+    const res = await fetch("/api/expand", { cache: "no-store" });
     const data = await res.json();
     setRemaining(data.remaining ?? null, Boolean(data.fuelOut), data.sharedLeft ?? null);
   } catch {

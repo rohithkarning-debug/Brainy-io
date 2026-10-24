@@ -55,19 +55,25 @@ const BASELINE_PROMPT =
 const DIRECTION_PREFIX =
   "You are a creative strategist. Turn the user's half-baked idea into a specific, finished concept. Constraint: ";
 
+// The count is per signed-in user: never let a browser or proxy reuse it.
+const NO_STORE = { headers: { "Cache-Control": "private, no-store" } };
+
 export async function GET(req: Request) {
   try {
     const visitor = await getVisitor(req);
     const [usage, pool] = await Promise.all([visitor ? checkUsage(visitor) : null, poolStatus()]);
-    return NextResponse.json({
-      remaining: usage?.remaining ?? null,
-      fuelOut: pool?.out ?? false,
-      sharedLeft: pool?.left ?? null,
-      sharedTotal: pool?.total ?? null,
-    });
+    return NextResponse.json(
+      {
+        remaining: usage?.remaining ?? null,
+        fuelOut: pool?.out ?? false,
+        sharedLeft: pool?.left ?? null,
+        sharedTotal: pool?.total ?? null,
+      },
+      NO_STORE
+    );
   } catch (err) {
     console.warn("Usage check failed:", err instanceof Error ? err.message : err);
-    return NextResponse.json({ remaining: null, fuelOut: false, sharedLeft: null, sharedTotal: null });
+    return NextResponse.json({ remaining: null, fuelOut: false, sharedLeft: null, sharedTotal: null }, NO_STORE);
   }
 }
 

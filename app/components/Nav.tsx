@@ -38,9 +38,20 @@ export function Nav() {
   const signedIn = useSession().status === "authenticated";
   const links = LINKS.filter((link) => signedIn || !link.private);
 
-  // Load today's free-run count for the badge once signed in.
+  // Load today's free-run count for the badge once signed in, and again when
+  // the tab comes back into view: runs on another device change it, and a tab
+  // left open would otherwise keep showing the old number.
   useEffect(() => {
-    if (signedIn) void refreshRemaining();
+    if (!signedIn) return;
+    void refreshRemaining();
+    let last = Date.now();
+    function onVisible() {
+      if (document.visibilityState !== "visible" || Date.now() - last < 10_000) return;
+      last = Date.now();
+      void refreshRemaining();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, [signedIn]);
   const [open, setOpen] = useState(false);
   const [lastPath, setLastPath] = useState(pathname);

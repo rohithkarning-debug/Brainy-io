@@ -31,8 +31,12 @@ const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TO
 export const redis = url && token ? new Redis({ url, token }) : null;
 
 // Fixed 1-day windows: counters reset at midnight UTC.
+// Windows are UTC days, worked out on the server (Date.now()), so a visitor's
+// timezone never matters. `timeout: 0`: by default the library gives up after
+// 5s and lets the request through *uncounted*, reporting remaining 0; we'd
+// rather wait, or fail closed (guard.ts answers "can't check limits").
 function daily(runs: number, prefix: string) {
-  return redis && new Ratelimit({ redis, limiter: Ratelimit.fixedWindow(runs, "1 d"), prefix });
+  return redis && new Ratelimit({ redis, limiter: Ratelimit.fixedWindow(runs, "1 d"), prefix, timeout: 0 });
 }
 const perUser = daily(RUNS_PER_USER_PER_DAY, "brainy:user");
 const perIp = daily(RUNS_PER_IP_PER_DAY, "brainy:ip");

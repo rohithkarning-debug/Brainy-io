@@ -108,7 +108,13 @@ it is retried once on the next model.
 
 ## Sign-in
 
-Google and GitHub sign-in via Auth.js v5 (`auth.ts`), with JWT sessions, so no database.
+Google and GitHub sign-in via Auth.js v5 (`auth.ts`), with JWT sessions (no sessions table).
+The account id is `email:<address>` **only when the provider verifies the email**
+(Google's `email_verified`; GitHub's primary address marked verified in its emails
+API), so signing in with Google on one device and GitHub on another is one account
+with one runs-left counter. Without a verified email it falls back to
+`<provider>:<account id>`; accounts are never merged on an unverified address.
+Sessions from the older id scheme are signed out once (`ID_VERSION` in `auth.ts`).
 Home, About and `/login` are public; `middleware.ts` sends signed-out visitors on
 any other page to `/login?callbackUrl=...`, and `/api/expand` returns 401 on its own
 check. Free runs are limited per user (5), with a looser per-IP backup (15), and
@@ -116,6 +122,33 @@ share the pool of model calls above. Each OAuth app needs these callback URLs:
 
 - `http://localhost:3000/api/auth/callback/google` and `.../github`
 - `https://brainy-io.vercel.app/api/auth/callback/google` and `.../github`
+
+## Cloud sync (opt-in)
+
+Off by default: history, saved results and settings live in localStorage. Settings →
+"Sync history across devices" keeps a copy in Postgres (Neon via Vercel Storage,
+`DATABASE_URL`), using Drizzle ORM (`lib/server/db/schema.ts`): `users`, `results`
+(the full result JSON incl. lineage, run plan and kept search results; saved flag;
+`is_public`; `share_slug`) and `user_settings`.
+
+- `lib/sync.ts` (browser): turning on uploads local results, then every change in
+  `lib/history.ts` / `lib/settings.ts` (runs, crosses, re-judges, saves, deletes) is
+  queued in localStorage and sent shortly after. On load and when the tab comes back it
+  pulls changes since its last pull; the newer copy of a result wins, and a result
+  synced before but gone from the cloud was deleted elsewhere. Turning off asks
+  whether to keep or delete the cloud copy.
+- `lib/server/sync.ts`: every query is scoped to the session's user id; writes are
+  refused unless that user has sync on; uploads are size-capped and every `url` is
+  cleaned to http(s).
+- "Make public" on a synced result serves it read-only at `/r/[slug]` (no sign-in,
+  its own social image, `noindex`). Settings → "Delete my data" removes the cloud copy
+  and this browser's history, settings and keys.
+- API keys never leave the browser. Upstash stays for rate limits, quota and model
+  health only.
+
+Migrations: `npm run db:generate` after changing the schema, then
+`DATABASE_URL_UNPOOLED=... npm run db:migrate` (all Vercel environments share one
+Neon database).
 
 ## How it fits together
 

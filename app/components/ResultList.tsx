@@ -46,7 +46,7 @@ export function ResultList({ mode }: { mode: "history" | "saved" }) {
         <p className="mt-1 text-sm text-slate-500">
           {mode === "saved"
             ? "Press Save on any result to keep it here. Saved results survive clearing your history."
-            : "Every result you get is kept here, in this browser."}
+            : "Every result you get is kept here."}
         </p>
         <Link href="/ask" className="mt-5 inline-block rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-dark">
           Cook something
