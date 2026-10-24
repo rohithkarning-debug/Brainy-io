@@ -9,15 +9,22 @@ export default function PrivacyPage() {
     <LegalPage
       eyebrow="Privacy"
       title="What Brainy does with your data"
-      updated="22 October 2026"
+      updated="24 October 2026"
       sections={[
         {
           heading: "Signing in",
           body: (
-            <p>
-              You sign in with Google or GitHub. From them Brainy reads only your name, email address and avatar. There
-              is no Brainy database of accounts: your session lives in a signed cookie in your browser.
-            </p>
+            <>
+              <p>
+                You sign in with Google or GitHub. From them Brainy reads only your name, email address and avatar.
+                Your session lives in a signed cookie in your browser.
+              </p>
+              <p>
+                If the provider confirms your email address is verified, your account is identified by that address, so
+                signing in with Google or GitHub reaches the same account. Otherwise it is identified by your provider
+                account id. Brainy never links accounts on an email address the provider hasn&apos;t verified.
+              </p>
+            </>
           ),
         },
         {
@@ -40,7 +47,9 @@ export default function PrivacyPage() {
                   to GitHub and arXiv search.
                 </li>
               </ul>
-              <p>Brainy itself doesn&apos;t keep your ideas or results on its servers.</p>
+              <p>
+                Brainy itself doesn&apos;t keep your ideas or results on its servers unless you turn on sync (below).
+              </p>
             </>
           ),
         },
@@ -48,8 +57,35 @@ export default function PrivacyPage() {
           heading: "Your history",
           body: (
             <p>
-              History, saved results and settings are stored in your browser&apos;s localStorage, on your device only.
-              Clearing your browser data, or &quot;Clear history&quot; in Brainy, removes them.
+              By default, history, saved results and settings are stored in your browser&apos;s localStorage, on your
+              device only. Clearing your browser data, or &quot;Clear history&quot; in Brainy, removes them.
+            </p>
+          ),
+        },
+        {
+          heading: "Cloud sync (optional, off by default)",
+          body: (
+            <>
+              <p>
+                If you turn on &quot;Sync history across devices&quot; in Settings, Brainy keeps a copy in its database
+                (Postgres, hosted by Neon), tied to your account: your results (ideas, directions, verdicts, the search
+                results they cite, and bred ideas), which ones you saved, and your settings. Nothing goes there while
+                sync is off.
+              </p>
+              <p>
+                Turning sync off asks whether to keep or delete that copy. &quot;Delete my data&quot; in Settings deletes it
+                (and this browser&apos;s history, settings and keys) at once.
+              </p>
+            </>
+          ),
+        },
+        {
+          heading: "Public links",
+          body: (
+            <p>
+              With sync on, you can make one result public. It is then readable by anyone with its link (no sign-in),
+              read-only, and asks search engines not to index it. Only the result is shown, never your name or email.
+              Make it private again, delete it, or delete your data to stop the link working.
             </p>
           ),
         },
@@ -63,7 +99,8 @@ export default function PrivacyPage() {
                 uses it for that request only, to call OpenRouter or Tavily on your behalf.
               </p>
               <p>
-                Brainy never stores your key in its database, logs, analytics or error messages, and never shows more
+                Brainy never stores your key in its database, logs, analytics or error messages (cloud sync never
+                includes it), and never shows more
                 than its last 4 characters. If your key is rejected, Brainy tells you instead of quietly using its own
                 key. Remove a key any time in Settings, and revoke it with the provider if you want it gone everywhere.
               </p>
@@ -73,10 +110,17 @@ export default function PrivacyPage() {
         {
           heading: "Usage limits",
           body: (
-            <p>
-              Each account gets {RUNS_PER_USER_PER_DAY} free runs a day, and runs on your own key have a separate fair-use cap. To enforce this, Brainy keeps daily run counters
-              keyed on your account id and IP address. They reset every day and hold nothing else.
-            </p>
+            <>
+              <p>
+                Each account gets {RUNS_PER_USER_PER_DAY} free runs a day, and runs on your own key have a separate
+                fair-use cap. To enforce this, Brainy keeps daily run counters keyed on your account id and IP address
+                in Upstash Redis. They reset every day and hold nothing else.
+              </p>
+              <p>
+                Upstash also holds a site-wide count of today&apos;s free AI requests and short-lived notes on which AI
+                models are busy. Neither contains anything about you.
+              </p>
+            </>
           ),
         },
         {

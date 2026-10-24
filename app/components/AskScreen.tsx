@@ -160,7 +160,7 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
             <span className="tabular-nums">
               {idea.length}/{MAX_IDEA_LENGTH}
             </span>
-            <span className="hidden sm:inline">
+            <span className="hidden sm:inline [@media(pointer:coarse)]:hidden">
               <Kbd>Enter</Kbd> to send · <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> new line
             </span>
           </p>

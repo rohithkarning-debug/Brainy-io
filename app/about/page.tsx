@@ -21,8 +21,8 @@ const STEPS = [
     body: "At the same time, Brainy searches the web, GitHub, past hackathon projects on Devpost and papers on arXiv (depending on the purpose) for things that already do this.",
   },
   {
-    title: "One honest judge",
-    body: "A separate judge model reads every version and the search results, rates how crowded the space is, and picks the most unique idea that could still work.",
+    title: "One judge, a straight verdict",
+    body: "A judge model (Auto picks a healthy one, or choose your own) reads every version and the search results, rates how crowded the space is, and picks the most unique idea that could still work.",
   },
   {
     title: "Prior work, for hackathons and research",

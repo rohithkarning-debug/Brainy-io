@@ -66,7 +66,7 @@ export default function RootLayout({
               </main>
               <footer className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 pb-8 text-xs text-slate-400 sm:px-6">
                 <p>
-                  brainy · 3 models · live search · 1 honest judge ·{" "}
+                  brainy · free AI models · live search · one judge ·{" "}
                   <Link href="/about" className="underline-offset-2 hover:text-slate-600 hover:underline">
                     how it works
                   </Link>

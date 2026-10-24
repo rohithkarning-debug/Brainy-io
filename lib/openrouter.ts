@@ -421,7 +421,7 @@ const SATURATION_LEVELS = ["Fresh", "Crowded", "Very saturated"] as const;
 
 /**
  * Send the original idea, every generated version and the search results
- * to a stronger model and get back Brainy's honest verdict.
+ * to the judge model and get back Brainy's verdict.
  * `models` is tried in order (see callWithFallback).
  * Pass `results = null` when no general search source (web, GitHub) ran.
  * `special` holds Devpost / arXiv results when those searches ran (an empty

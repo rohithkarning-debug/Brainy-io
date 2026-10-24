@@ -78,8 +78,8 @@ export default async function LoginPage({
       </div>
 
       <p className="mt-6 text-xs leading-relaxed text-slate-400">
-        We only read your name, email and avatar. Your history stays in this browser. Ideas are sent to AI and
-        search providers only to generate results.
+        We only read your name, email and avatar. Your history stays in this browser unless you turn on sync.
+        Ideas are sent to AI and search providers only to generate results.
       </p>
       <p className="mt-3 text-xs text-slate-400">
         <Link href="/privacy" className="underline underline-offset-2 hover:text-slate-600">

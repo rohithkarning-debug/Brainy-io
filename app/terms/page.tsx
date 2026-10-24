@@ -10,7 +10,7 @@ export default function TermsPage() {
     <LegalPage
       eyebrow="Terms"
       title="Terms of use"
-      updated="22 October 2026"
+      updated="24 October 2026"
       sections={[
         {
           heading: "The service",
@@ -40,7 +40,9 @@ export default function TermsPage() {
             <p>
               Results are written by AI models and can be wrong, out of date or unoriginal. The verdict is an informed
               opinion, not professional, legal or financial advice. Check things yourself before relying on them.
-              Your ideas, and what you do with the results, are yours.
+              Your ideas, and what you do with the results, are yours. If you make a result public, anyone with the
+              link can read it, so only share what you&apos;re happy for others to see; you can make it private again
+              at any time.
             </p>
           ),
         },

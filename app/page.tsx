@@ -15,9 +15,9 @@ const FEATURES = [
     body: "A live search looks for products, repos and papers that already do this, so you know what you're up against.",
   },
   {
-    eyebrow: "1 honest judge",
+    eyebrow: "1 judge",
     title: "A verdict, not a pep talk",
-    body: "A separate judge model reads everything and tells you how crowded the space is, and which direction is worth chasing.",
+    body: "A judge model reads every version and the search results, then tells you how crowded the space is and which direction is worth chasing.",
   },
 ];
 
