@@ -50,7 +50,7 @@ export function ResultScreen({ id }: { id: string }) {
 
 /**
  * One result with its tabs. `example` is the static sample on the home page:
- * no page actions, and the page around it handles the colour reveal.
+ * no page actions, and it never turns the page to colour (that is only for real results).
  */
 export function ResultView({
   result,
@@ -251,7 +251,7 @@ export function ResultView({
             </ActionButton>
           </>
         )}
-        {finished && motion && (
+        {finished && motion && !example && (
           <ActionButton icon="sparkle" onClick={replayReveal}>
             Replay reveal
           </ActionButton>

@@ -1,36 +1,22 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import { ResultView } from "@/app/components/ResultScreen";
 import example from "@/lib/example-result.json";
 import type { Result } from "@/lib/history";
-import { setCooked } from "@/lib/reveal";
 
 const EXAMPLE = example as Result;
 
-// The pre-cooked sample on the home page. The page blooms into colour while it's
-// on screen and fades back to black and white once it scrolls away.
+// The pre-cooked sample on the home page. Colour is only for real cooked
+// results, so the sample never triggers the reveal (ResultView skips it for
+// `example`), and `grayscale` keeps fixed accents like the saturation badge
+// monochrome too.
 export function ExampleResult() {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    // Counts as on screen once it reaches the middle band of the viewport,
-    // which works however tall the sample is on a phone.
-    const observer = new IntersectionObserver(([entry]) => setCooked(entry.isIntersecting), {
-      rootMargin: "-35% 0px -35% 0px",
-    });
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      setCooked(false, { animate: false });
-    };
-  }, []);
-
   return (
-    <div ref={ref}>
-      <ResultView result={EXAMPLE} example />
+    <div>
+      <div className="grayscale">
+        <ResultView result={EXAMPLE} example />
+      </div>
+      <p className="mt-4 text-center text-sm text-slate-500">Cook your own to see it in colour.</p>
     </div>
   );
 }
