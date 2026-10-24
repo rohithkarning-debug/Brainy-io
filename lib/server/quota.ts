@@ -102,6 +102,8 @@ async function markOut() {
 export type RunMeter = Meter & {
   /** Hand back unused reserved calls and wait for health writes. Call once, at the end. */
   finish(): Promise<void>;
+  /** The request failed: hand back EVERY call it took from the pool, used or not. Then call finish(). */
+  refund(): Promise<void>;
   /** True once the pool ran dry (or OpenRouter's daily cap hit) during this request. */
   readonly ranDry: boolean;
 };
@@ -112,6 +114,8 @@ export type RunMeter = Meter & {
  */
 export function createMeter(reservation: Extract<Reservation, { ok: true }> | null): RunMeter {
   let reserved = reservation?.count ?? 0;
+  let extra = 0; // calls taken from the pool beyond the reservation
+  let refunded = false;
   let dry = false;
   const pending: Promise<unknown>[] = [];
   const pooled = reservation !== null && redis !== null;
@@ -126,11 +130,12 @@ export function createMeter(reservation: Extract<Reservation, { ok: true }> | nu
         return;
       }
       // A fallback or retry beyond the estimate: one more from the pool, if there is one.
-      const extra = await reserve(1).catch(() => null);
-      if (!extra?.ok) {
+      const more = await reserve(1).catch(() => null);
+      if (!more?.ok) {
         dry = true;
         throw new OutOfCallsError();
       }
+      extra++;
     },
     failed(model, err) {
       pending.push(noteFailure(model, err));
@@ -140,9 +145,14 @@ export function createMeter(reservation: Extract<Reservation, { ok: true }> | nu
       }
     },
     async finish() {
-      if (pooled && reservation) await release(reservation.day, reserved);
+      if (pooled && reservation && !refunded) await release(reservation.day, reserved);
       reserved = 0;
       await Promise.allSettled(pending);
+    },
+    async refund() {
+      if (!pooled || !reservation || refunded) return;
+      refunded = true;
+      await release(reservation.day, reservation.count + extra);
     },
     get ranDry() {
       return dry;

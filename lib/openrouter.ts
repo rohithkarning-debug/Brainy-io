@@ -119,16 +119,17 @@ export function isKeyLimitError(err: unknown): boolean {
   return err instanceof HttpError && err.status === 429 && /free-models-per-(day|min)/i.test(err.message);
 }
 
-// Statuses worth trying another model for: out of credits, rate-limited,
-// down, or (404) no longer offered by its provider.
+// Statuses worth trying another model for: out of credits, refused (403,
+// e.g. a free model OpenRouter now limits to "agentic harnesses"), no longer
+// offered by its provider (404), timed out upstream (408), rate-limited or down.
 function shouldFallBack(err: HttpError) {
-  const { status } = err;
-  return !isKeyLimitError(err) && (status === 402 || status === 404 || status === 429 || status >= 500);
+  if (isKeyLimitError(err)) return false;
+  return [402, 403, 404, 408, 429].includes(err.status) || err.status >= 500;
 }
 
-/** True if a call failed because the model, the key or the free pool ran out (402/429). */
-export function isQuotaError(err: unknown): boolean {
-  return err instanceof OutOfCallsError || (err instanceof HttpError && (err.status === 402 || err.status === 429));
+/** True if a call gave up because the model took too long. */
+export function isTimeout(err: unknown): boolean {
+  return err instanceof Error && err.name === "TimeoutError";
 }
 
 /** True if OpenRouter refused the API key itself (401). */
@@ -242,11 +243,17 @@ async function callWithFallback(
   throw lastError;
 }
 
+// Added to the instructions on the second attempt after an unusable reply.
+const STRICTER =
+  "\n\nIMPORTANT: a previous reply could not be used because its JSON was invalid or cut off. Reply with ONLY the JSON object: nothing before or after it, no markdown, every field brief so it fits.";
+
 /**
  * Like callWithFallback, but the reply must also parse. Long JSON replies
- * (the verdict, a cross) occasionally come back malformed, and free reasoning
- * models sometimes run past their timeout; either way we try once more with
- * the next model in the list instead of losing the whole answer.
+ * (the verdict, a cross) occasionally come back malformed or cut off, and free
+ * reasoning models sometimes run past their timeout. Either way we try once
+ * more: after a timeout with the next model, after an unusable reply with the
+ * next model (or the same one if it was the last) on a stricter prompt with
+ * more room to answer.
  */
 async function callAndParse<T>(
   models: string[],
@@ -277,7 +284,10 @@ async function callAndParse<T>(
       if (settings.signal?.aborted) throw err;
       console.warn(`Unusable reply from ${reply.model}:`, err instanceof Error ? err.message : err);
       lastError = err;
-      remaining = remaining.slice(remaining.indexOf(reply.model) + 1);
+      const next = remaining.slice(remaining.indexOf(reply.model) + 1);
+      remaining = next.length > 0 ? next : [reply.model];
+      system += STRICTER;
+      settings = { ...settings, maxTokens: Math.min(Math.round((settings.maxTokens ?? 800) * 1.5), 4000) };
     }
   }
   throw lastError;
@@ -644,7 +654,7 @@ export async function crossIdeas(
   const user = `Purpose: ${PURPOSES[purpose].label}\n\nOriginal idea:\n${idea}\n\n${describe(parents[0], "A")}\n\n${describe(parents[1], "B")}`;
 
   // Three ideas in one reply, so roughly three times one version's budget.
-  const settings = { temperature: 0.9, timeoutMs: 45_000, maxTokens: Math.min(maxTokens * 3, 3600), signal, apiKey, meter, deadline };
+  const settings = { temperature: 0.9, timeoutMs: 60_000, maxTokens: Math.min(maxTokens * 3, 3600), signal, apiKey, meter, deadline };
   return callAndParse(models, system, user, settings, (text, model) => {
     const obj = extractJSON(text);
     const list: unknown[] = Array.isArray(obj.offspring) ? obj.offspring : [];

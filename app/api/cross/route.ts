@@ -2,24 +2,30 @@
 // Body: { idea, purpose, length?, tone?, parents: [ParentIdea, ParentIdea] }
 // (see lib/lineage.ts). Optional own-key headers as for /api/expand.
 // Returns: { offspring: OffspringJSON[] (up to 3), model, remaining? }
-// Errors: { error, limitReached?, fuelOut?, keyProblem? } with a 4xx/5xx status.
+// Errors: { error, limitReached?, fuelOut?, keyProblem?, busy?, refunded?, remaining? } with a 4xx/5xx status.
 //
-// Breeds two ideas into three offspring with one model call (a free model,
-// with free fallbacks). Counts as one run (or one own-key run), like
-// /api/expand, and one call from the shared free pool. Signed out: 401.
+// Breeds two ideas into three offspring with one model call, on the same
+// healthy free-model fallback chain as the directions (busy and refusing
+// models are skipped). An unusable or cut-off reply is retried once on a
+// stricter prompt. Counts as one run (or one own-key run) and one call from
+// the shared free pool, but if the cross fails the run and every shared call
+// it took are given back. Signed out: 401.
 
 import { NextResponse } from "next/server";
 import { crossIdeas } from "@/lib/openrouter";
 import { readBase, readIdea } from "@/lib/server/breed-input";
-import { admit, failureResponse, identify } from "@/lib/server/guard";
+import { admit, identify, refundAndFail } from "@/lib/server/guard";
 import { chainFor, lineup } from "@/lib/server/models";
 import { LENGTHS, styleInstruction } from "@/lib/style";
 
-// One 45s call, plus one retry on the next model if it times out or its reply is unusable.
-export const maxDuration = 120;
+// Up to 60s per model, plus one retry if it times out or its reply is
+// unusable, all within BUDGET_MS so the reply always gets back to the page.
+export const maxDuration = 180;
+const BUDGET_MS = (maxDuration - 10) * 1000;
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  const startedAt = Date.now();
   const caller = await identify(req);
   if (caller instanceof NextResponse) return caller;
 
@@ -45,11 +51,12 @@ export async function POST(req: Request) {
       signal: req.signal,
       apiKey: caller.keys.openrouter,
       meter,
+      deadline: startedAt + BUDGET_MS,
     });
     return NextResponse.json({ offspring, model, ...(!caller.ownKey && { remaining: usage.remaining }) });
   } catch (err) {
     console.warn("Cross failed:", err instanceof Error ? err.message : err);
-    return failureResponse([err], caller.ownKey);
+    return refundAndFail(caller, admission, [err]);
   } finally {
     await meter.finish();
   }

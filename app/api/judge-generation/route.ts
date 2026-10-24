@@ -3,16 +3,17 @@
 //         offspring: (ParentIdea & { id, inherits })[] } (2 to 9).
 // Optional own-key headers as for /api/expand.
 // Returns: { pickId, why, notes: { id, note }[], model, remaining? }
-// Errors: { error, limitReached?, fuelOut?, keyProblem? } with a 4xx/5xx status.
+// Errors: { error, limitReached?, fuelOut?, keyProblem?, busy?, refunded?, remaining? } with a 4xx/5xx status.
 //
 // The judge's verdict on one generation of bred ideas. Counts as one run
-// (or one own-key run) and one call from the shared free pool. Signed out: 401.
+// (or one own-key run) and one call from the shared free pool, both given
+// back if the judge fails. Signed out: 401.
 
 import { NextResponse } from "next/server";
 import { MAX_JUDGED } from "@/lib/lineage";
 import { judgeOffspring } from "@/lib/openrouter";
 import { readBase, readIdea, readModelChoice } from "@/lib/server/breed-input";
-import { admit, failureResponse, identify } from "@/lib/server/guard";
+import { admit, identify, refundAndFail } from "@/lib/server/guard";
 import { lineup } from "@/lib/server/models";
 import { styleInstruction } from "@/lib/style";
 
@@ -55,7 +56,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ...verdict, ...(!caller.ownKey && { remaining: usage.remaining }) });
   } catch (err) {
     console.warn("Generation judge failed:", err instanceof Error ? err.message : err);
-    return failureResponse([err], caller.ownKey);
+    return refundAndFail(caller, admission, [err]);
   } finally {
     await meter.finish();
   }

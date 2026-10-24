@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useMotionAllowed } from "@/lib/settings";
 
-// Playful lines that rotate while Brainy works.
-const LINES = [
+// Playful lines that rotate while Brainy works: a normal run...
+export const RUN_LINES = [
   "Cooking",
   "Stirring the neurons",
   "Asking the big brain",
@@ -16,25 +16,48 @@ const LINES = [
   "Plating your answer",
 ];
 
+// ...crossing two ideas...
+export const BREED_LINES = [
+  "Crossing the ideas",
+  "Mixing the genes",
+  "Checking what each parent passes on",
+  "Growing offspring",
+  "Almost hatched",
+];
+
+// ...and a judge weighing ideas (a generation, or "Try another judge").
+export const JUDGE_LINES = ["Weighing the options", "Reading every idea", "Comparing the strongest angles", "Picking a winner"];
+
 /**
  * The "cooking" state: a sweeping bar, a playful line that changes every
  * 1.5s with a fade, and bouncing dots. `progress` is the honest status line
  * underneath (what has actually arrived), and it is what screen readers hear.
+ * `lines` picks the set (a run, breeding, judging); `compact` fits inside a
+ * section rather than filling the verdict panel. With animations off or
+ * reduced motion, the first line stays put and nothing moves.
  */
-export function CookingLoader({ progress }: { progress: string }) {
+export function CookingLoader({
+  progress,
+  lines = RUN_LINES,
+  compact = false,
+}: {
+  progress: string;
+  lines?: string[];
+  compact?: boolean;
+}) {
   const motion = useMotionAllowed();
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
     if (!motion) return;
-    const timer = setInterval(() => setIndex((i) => (i + 1) % LINES.length), 1500);
+    const timer = setInterval(() => setIndex((i) => (i + 1) % lines.length), 1500);
     return () => clearInterval(timer);
-  }, [motion]);
+  }, [motion, lines.length]);
 
-  const line = motion ? LINES[index] : LINES[0];
+  const line = motion ? lines[index % lines.length] : lines[0];
 
   return (
-    <div className="flex flex-col items-center gap-5 py-12 text-center">
+    <div className={`flex flex-col items-center text-center ${compact ? "gap-3 py-6" : "gap-5 py-12"}`}>
       <div aria-hidden className="h-1 w-48 overflow-hidden rounded-full bg-slate-200">
         <div className="animate-sweep h-full w-1/3 rounded-full bg-slate-950" />
       </div>
@@ -42,7 +65,7 @@ export function CookingLoader({ progress }: { progress: string }) {
       <p
         key={index}
         aria-hidden
-        className={`text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl ${motion ? "animate-fade-swap" : ""}`}
+        className={`font-semibold tracking-tight text-slate-900 ${compact ? "text-lg sm:text-xl" : "text-2xl sm:text-3xl"} ${motion ? "animate-fade-swap" : ""}`}
       >
         {line}
         <span className="ml-0.5 inline-flex gap-0.5">

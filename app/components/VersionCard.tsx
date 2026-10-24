@@ -17,7 +17,7 @@ const REVEAL_COLORS = ["violet", "pink", "orange", "cyan"];
 //   `select`   a "Select to cross" checkbox
 //   `inherits` the "Inherits X from A, Y from B" line
 //   `save`     a save toggle
-//   `fresh`    just born: blooms from grey into colour
+//   `fresh`    just born: blooms from grey into colour (after `delay` seconds, so a litter arrives one by one)
 //   `note`     the judge's one line on it
 export function VersionCard({
   version,
@@ -31,6 +31,7 @@ export function VersionCard({
   inherits,
   save,
   fresh = false,
+  delay = 0,
   note,
   id,
 }: {
@@ -45,12 +46,14 @@ export function VersionCard({
   inherits?: string;
   save?: { saved: boolean; onToggle: () => void };
   fresh?: boolean;
+  delay?: number;
   note?: string;
   id?: string;
 }) {
   return (
     <article
       id={id}
+      style={fresh && delay > 0 ? { animationDelay: `${delay}s` } : undefined}
       className={`relative flex h-full scroll-mt-28 flex-col gap-3 rounded-2xl border p-6 transition duration-200 ${
         fresh ? "animate-offspring-bloom" : "animate-rise-in"
       } ${

@@ -98,6 +98,25 @@ export async function consumeRun(visitor: Visitor, { ownKey = false }: { ownKey?
   return { remaining: Math.min(mine.remaining, here.remaining), blockedBy: null };
 }
 
+/**
+ * Give back a run that failed on our side (e.g. a cross every model refused),
+ * so the visitor isn't charged for it. Returns the free runs left afterwards
+ * (null for an own-key run or when limits are off).
+ */
+export async function refundRun(visitor: Visitor, { ownKey = false }: { ownKey?: boolean } = {}): Promise<number | null> {
+  // A negative rate takes a token back out of today's window.
+  if (ownKey) {
+    await perUserOwnKey?.limit(visitor.userId, { rate: -1 });
+    return null;
+  }
+  if (!perUser || !perIp) return null;
+  const [mine, here] = await Promise.all([
+    perUser.limit(visitor.userId, { rate: -1 }),
+    perIp.limit(visitor.ip, { rate: -1 }),
+  ]);
+  return Math.max(0, Math.min(mine.remaining, here.remaining));
+}
+
 /** Use up one "Try another judge" re-run. Leaves the free-run count alone. */
 export async function consumeRejudge({ userId }: Visitor): Promise<Usage> {
   if (!perUserRejudge) return { remaining: null, blockedBy: null };

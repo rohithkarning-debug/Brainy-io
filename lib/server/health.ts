@@ -1,8 +1,9 @@
 // Model health, shared by every visitor: a model that just answered 429, 5xx
 // or timed out is "busy" for 10 minutes; one that answered 404 (no longer
-// offered) is "unavailable" for an hour. Auto picks and fallback chains skip
-// both. Stored in one Upstash hash (model id -> "status:expiresAt"), or in
-// memory when Upstash isn't configured. Server-only.
+// offered) or 403 (refuses apps like ours) is "unavailable" for an hour.
+// Auto picks and fallback chains skip both. Stored in one Upstash hash
+// (model id -> "status:expiresAt"), or in memory when Upstash isn't
+// configured. Server-only.
 
 import { httpStatus, isAuthError, isKeyLimitError } from "@/lib/openrouter";
 import { redis } from "@/lib/ratelimit";
@@ -62,7 +63,11 @@ export function noteFailure(model: string, err: unknown): Promise<void> {
   if (isAuthError(err) || isKeyLimitError(err)) return Promise.resolve();
   const status = httpStatus(err);
   const timedOut = err instanceof Error && err.name === "TimeoutError";
-  if (status === 404) return mark(model, "unavailable", DOWN_MS);
+  // 404: no longer offered. 403: refused for every request like ours (e.g. a
+  // free model OpenRouter now limits to "agentic harnesses"); a moderation
+  // 403 is about the input, not the model, so it doesn't count.
+  const moderated = err instanceof Error && /moderation|flagged/i.test(err.message);
+  if (status === 404 || (status === 403 && !moderated)) return mark(model, "unavailable", DOWN_MS);
   if (timedOut || status === 429 || (status !== null && status >= 500)) return mark(model, "busy", BUSY_MS);
   return Promise.resolve();
 }

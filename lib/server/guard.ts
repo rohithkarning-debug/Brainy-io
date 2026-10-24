@@ -7,8 +7,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { KEY_HEADERS, isValidKey, type KeyProvider } from "@/lib/key-format";
 import { BYOK_RUNS_PER_USER_PER_DAY, REJUDGES_PER_USER_PER_DAY, RUNS_PER_USER_PER_DAY } from "@/lib/limits";
-import { OutOfCallsError, isAuthError, isDailyLimitError, isQuotaError } from "@/lib/openrouter";
-import { checkUsage, consumeRejudge, consumeRun, getClientIp, type Usage, type Visitor } from "@/lib/ratelimit";
+import { OutOfCallsError, httpStatus, isAuthError, isDailyLimitError, isKeyLimitError, isTimeout } from "@/lib/openrouter";
+import { checkUsage, consumeRejudge, consumeRun, getClientIp, refundRun, type Usage, type Visitor } from "@/lib/ratelimit";
 import { createMeter, release, reserve, type Reservation, type RunMeter } from "@/lib/server/quota";
 
 // Shown for any server-side problem. Details go to the logs, never to visitors.
@@ -135,32 +135,59 @@ export async function admit(
   }
 }
 
-export type Failure = { error: string; outOfJuice?: boolean; keyProblem?: boolean };
+export type Failure = { error: string; outOfJuice?: boolean; keyProblem?: boolean; busy?: boolean };
 
-// Every model was rate-limited by its provider, but nothing is used up.
-const ALL_BUSY = "Every free model is busy right now. Try again in a few minutes, or pick other models under Advanced.";
+// The models themselves failed (rate-limited, refused, gone, down or too slow); nothing is used up.
+const ALL_BUSY = "The models are busy right now, try again in a minute.";
+
+function modelTrouble(err: unknown) {
+  const status = httpStatus(err);
+  return isTimeout(err) || (status !== null && ([403, 404, 408, 429].includes(status) || status >= 500));
+}
 
 /**
  * Explain why every model call failed. A refused or empty user key is named
  * as such (we never fall back to the server key behind their back). On the
  * server key, the shared pool running dry or OpenRouter's daily free cap
- * means the free fuel is out; plain rate limits mean the models are busy.
+ * means the free fuel is out. When every failure was the models' own trouble
+ * (rate limits, refusals, timeouts), they're busy. Anything else is generic.
  */
 export function explainFailure(reasons: unknown[], ownKey: boolean): Failure {
   if (ownKey && reasons.some(isAuthError)) return { error: KEY_REJECTED, keyProblem: true };
-  if (reasons.length > 0 && reasons.every(isQuotaError)) {
-    if (ownKey) return { error: KEY_EMPTY, keyProblem: true };
-    if (reasons.some((r) => r instanceof OutOfCallsError || isDailyLimitError(r))) {
-      return { error: FUEL_OUT, outOfJuice: true };
-    }
-    return { error: ALL_BUSY };
+  if (!ownKey && reasons.some((r) => r instanceof OutOfCallsError || isDailyLimitError(r))) {
+    return { error: FUEL_OUT, outOfJuice: true };
   }
+  if (ownKey && reasons.some((r) => httpStatus(r) === 402 || isKeyLimitError(r))) return { error: KEY_EMPTY, keyProblem: true };
+  if (reasons.length > 0 && reasons.every(modelTrouble)) return { error: ALL_BUSY, busy: true };
   return { error: GENERIC_ERROR };
+}
+
+function failureStatus(failure: Failure) {
+  return failure.keyProblem ? 400 : failure.outOfJuice ? 429 : failure.busy ? 503 : 502;
 }
 
 /** The same as a JSON error response, for the non-streaming routes. */
 export function failureResponse(reasons: unknown[], ownKey: boolean) {
   const failure = explainFailure(reasons, ownKey);
-  const status = failure.keyProblem ? 400 : failure.outOfJuice ? 429 : 502;
-  return NextResponse.json({ ...failure, fuelOut: failure.outOfJuice }, { status });
+  return NextResponse.json({ ...failure, fuelOut: failure.outOfJuice }, { status: failureStatus(failure) });
+}
+
+/**
+ * A request that used up a run failed on our side: give the run back, and
+ * every shared call it took, then reply like failureResponse. `remaining` is
+ * the visitor's free runs after the refund, so the page shows the right count.
+ */
+export async function refundAndFail(caller: Caller, admission: Admission, reasons: unknown[]) {
+  const failure = explainFailure(reasons, caller.ownKey);
+  let remaining: number | null = null;
+  try {
+    await admission.meter.refund();
+    remaining = await refundRun(caller.visitor, { ownKey: caller.ownKey });
+  } catch (err) {
+    console.warn("Refund failed:", err instanceof Error ? err.message : err);
+  }
+  return NextResponse.json(
+    { ...failure, fuelOut: failure.outOfJuice, refunded: true, ...(!caller.ownKey && { remaining }) },
+    { status: failureStatus(failure) }
+  );
 }

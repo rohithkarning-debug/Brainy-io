@@ -19,7 +19,8 @@ import { noteUsage } from "@/lib/run";
 import { getSettings } from "@/lib/settings";
 
 /** What went wrong, shaped like a result's notes so the page can reuse them. */
-export type BreedError = { error: string; outOfJuice?: boolean; keyProblem?: boolean; limited?: boolean };
+// busy = the models were rate-limited or refused (worth retrying in a minute); the run was given back.
+export type BreedError = { error: string; outOfJuice?: boolean; keyProblem?: boolean; limited?: boolean; busy?: boolean };
 
 const shortId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 8);
 
@@ -45,6 +46,7 @@ async function post<T>(url: string, body: unknown): Promise<T | BreedError> {
         outOfJuice: Boolean(data.fuelOut),
         keyProblem: Boolean(data.keyProblem),
         limited: Boolean(data.limitReached) && !data.fuelOut,
+        busy: Boolean(data.busy),
       };
     }
     if (data.remaining !== undefined) noteUsage(data.remaining);

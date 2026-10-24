@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { BREED_LINES, CookingLoader, JUDGE_LINES, SkeletonCard } from "@/app/components/CookingLoader";
 import { LineageTree } from "@/app/components/LineageTree";
 import { useToast } from "@/app/components/Toast";
 import { ActionButton, Icon, Label } from "@/app/components/ui";
@@ -70,24 +71,66 @@ export function CrossBar({
         <span id="cross-hint" className="sr-only">
           Select exactly two ideas to cross them.
         </span>
-        {error && <BreedNote error={error} />}
+        {error && <BreedNote error={error} onRetry={selected.length === 2 && !crossing ? onCross : undefined} />}
       </div>
     </div>
   );
 }
 
-/** A breeding error, with a way forward when it's about limits or keys. */
-export function BreedNote({ error }: { error: BreedError }) {
+/**
+ * A breeding error, with a way forward: a link when it's about limits or
+ * keys, and Retry when trying again could work. A failed cross or judge
+ * doesn't use up a run, so retrying is free.
+ */
+export function BreedNote({ error, onRetry }: { error: BreedError; onRetry?: () => void }) {
   const settingsLink = error.keyProblem || error.limited || error.outOfJuice;
+  const canRetry = onRetry && !error.limited && !error.outOfJuice;
   return (
-    <p role="alert" className="w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-      {error.error}{" "}
-      {settingsLink && (
-        <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
-          {error.keyProblem ? "Open Settings" : "Add your own free OpenRouter key"} <span aria-hidden>→</span>
-        </Link>
+    <div role="alert" className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      <p className="min-w-0 flex-1">
+        {error.error}{" "}
+        {settingsLink && (
+          <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
+            {error.keyProblem ? "Open Settings" : "Add your own free OpenRouter key"} <span aria-hidden>→</span>
+          </Link>
+        )}
+      </p>
+      {canRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-amber-300 bg-surface px-3 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100/60"
+        >
+          <Icon name="refresh" className="h-3.5 w-3.5" /> Retry
+        </button>
       )}
-    </p>
+    </div>
+  );
+}
+
+/** While a cross runs: the breeding loader and placeholders where the offspring will land. */
+function BreedingPlaceholder({ generation, parents }: { generation: number; parents: string[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Bring it into view, since the cross may have been started from further up the page.
+  useEffect(() => {
+    const reduce = document.documentElement.dataset.motion === "off" || matchMedia("(prefers-reduced-motion: reduce)").matches;
+    ref.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "nearest" });
+  }, []);
+  return (
+    <div ref={ref} className="mt-6 scroll-mt-28">
+      <div className="rounded-2xl border border-line bg-surface/70 shadow-card">
+        <CookingLoader
+          compact
+          lines={BREED_LINES}
+          progress={`Breeding ${OFFSPRING_PER_CROSS} offspring from “${parents[0]}” and “${parents[1]}”`}
+        />
+      </div>
+      <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: OFFSPRING_PER_CROSS }, (_, i) => (
+          <SkeletonCard key={i} label={`Gen ${generation}`} />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -102,6 +145,7 @@ export function LineagePanel({
   onToggle,
   freshIds,
   stored,
+  pending,
 }: {
   result: Result;
   versions: Version[]; // in direction order
@@ -111,13 +155,17 @@ export function LineagePanel({
   onToggle: (id: NodeId) => void;
   freshIds: Set<string>;
   stored: boolean;
+  pending?: { generation: number; parents: string[] } | null; // a cross is running
 }) {
   const toast = useToast();
   const [focused, setFocused] = useState<NodeId | null>(null);
   const [judging, setJudging] = useState<number | null>(null);
   const [judgeError, setJudgeError] = useState<{ generation: number; error: BreedError } | null>(null);
 
-  const generations = [...new Set(lineage.offspring.map((o) => o.generation))].sort((a, b) => a - b);
+  // The generation a running cross will add to is shown too, so its placeholders sit where the offspring will land.
+  const generations = [...new Set([...lineage.offspring.map((o) => o.generation), ...(pending ? [pending.generation] : [])])].sort(
+    (a, b) => a - b
+  );
   const pickIds = new Set(lineage.verdicts.map((v) => v.pickId));
   const focusedIdea = focused ? findIdea(versions, lineage, focused) : null;
 
@@ -174,7 +222,7 @@ export function LineagePanel({
         </div>
       )}
 
-      {generations.length === 0 && (
+      {generations.length === 0 && !pending && (
         <p className="mt-8 rounded-2xl border border-dashed border-line p-6 text-center text-sm text-slate-500">
           No offspring yet. Pick two directions in the tree above (or on the Directions tab) and press Cross.
         </p>
@@ -187,16 +235,23 @@ export function LineagePanel({
         const toJudge = chosen.length >= 2 ? chosen : kids.slice(-MAX_JUDGED).map((o) => o.id);
         const verdict = lineage.verdicts.find((v) => v.generation === g);
         const picked = verdict && kids.find((o) => o.id === verdict.pickId);
+        const breeding = pending?.generation === g;
+        // New offspring bloom one after another.
+        const freshOrder = kids.filter((o) => freshIds.has(o.id)).map((o) => o.id);
         return (
           <section key={g} aria-labelledby={`gen-${g}`} className="mt-12">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <Label>Generation {g}</Label>
                 <h3 id={`gen-${g}`} className="mt-1 text-xl font-semibold tracking-[-0.02em] text-slate-950">
-                  {kids.length} offspring
+                  {kids.length > 0 ? `${kids.length} offspring` : "Breeding…"}
                 </h3>
               </div>
-              <ActionButton icon="sparkle" onClick={() => judge(g, toJudge)} disabled={!stored || toJudge.length < 2 || judging !== null}>
+              <ActionButton
+                icon="sparkle"
+                onClick={() => judge(g, toJudge)}
+                disabled={!stored || toJudge.length < 2 || judging !== null || breeding}
+              >
                 {judging === g
                   ? "Judging…"
                   : chosen.length >= 2
@@ -207,7 +262,13 @@ export function LineagePanel({
 
             {judgeError?.generation === g && (
               <div className="mt-4">
-                <BreedNote error={judgeError.error} />
+                <BreedNote error={judgeError.error} onRetry={judging === null ? () => judge(g, toJudge) : undefined} />
+              </div>
+            )}
+
+            {judging === g && (
+              <div className="mt-5 rounded-2xl border border-line bg-surface/70 shadow-card">
+                <CookingLoader compact lines={JUDGE_LINES} progress={`Judging ${toJudge.length} offspring from generation ${g}`} />
               </div>
             )}
 
@@ -233,6 +294,7 @@ export function LineagePanel({
                     detailsOpen={false}
                     inherits={o.inherits}
                     fresh={freshIds.has(o.id)}
+                    delay={Math.max(0, freshOrder.indexOf(o.id)) * 0.35}
                     picked={verdict?.pickId === o.id}
                     note={verdict?.notes.find((n) => n.id === o.id)?.note}
                     save={
@@ -252,6 +314,7 @@ export function LineagePanel({
                 );
               })}
             </div>
+            {breeding && <BreedingPlaceholder generation={g} parents={pending.parents} />}
           </section>
         );
       })}

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useLayoutEffect, useState } from "react";
 import { BrainyTakeCard } from "@/app/components/BrainyTakeCard";
-import { CookingLoader, SkeletonCard } from "@/app/components/CookingLoader";
+import { CookingLoader, JUDGE_LINES, SkeletonCard } from "@/app/components/CookingLoader";
 import { useCopyShare } from "@/app/components/CopyShare";
 import { CrossBar, LineagePanel } from "@/app/components/Lineage";
 import { JudgeSelect } from "@/app/components/ModelPicker";
@@ -16,7 +16,7 @@ import { crossNodes, isBreedError, type BreedError } from "@/lib/breed";
 import { formatDate, resultToText, sourceList } from "@/lib/format";
 import { togglePin, useHistory, type Result } from "@/lib/history";
 import { useKeys } from "@/lib/keys";
-import { directionNodeId, readLineage, type Lineage, type NodeId } from "@/lib/lineage";
+import { directionNodeId, findIdea, readLineage, type Lineage, type NodeId } from "@/lib/lineage";
 import { useModels } from "@/lib/models";
 import { PURPOSES } from "@/lib/purposes";
 import { rejudge, startRun, stopRun, useRun } from "@/lib/run";
@@ -117,7 +117,8 @@ export function ResultView({
   // Only on a finished, stored result (bred ideas are saved into it), never the home-page sample.
   const canBreed = finished && stored && !example;
   const [selected, setSelected] = useState<NodeId[]>([]);
-  const [crossing, setCrossing] = useState(false);
+  // While a cross runs: which generation it will add to, and its parents' titles (for the loader).
+  const [crossing, setCrossing] = useState<{ generation: number; parents: string[] } | null>(null);
   const [crossError, setCrossError] = useState<BreedError | null>(null);
   const [freshIds, setFreshIds] = useState<Set<string>>(() => new Set());
   // Directions in their usual order, for the tree.
@@ -130,18 +131,21 @@ export function ResultView({
   const canSelect = (id: NodeId) => selected.includes(id) || selected.length < 2;
 
   async function cross() {
-    if (selected.length !== 2) return;
-    setCrossing(true);
+    if (selected.length !== 2 || crossing) return;
+    const parents = selected.map((id) => findIdea(result.versions, lineage, id));
+    // Same rule as crossNodes: one generation past the older parent.
+    const generation = Math.max(...parents.map((p) => p?.generation ?? 0)) + 1;
+    setCrossing({ generation, parents: parents.map((p) => p?.idea.title ?? "an idea") });
     setCrossError(null);
+    setTab("lineage"); // the loader and placeholders are where the offspring will land
     const born = await crossNodes(result, [selected[0], selected[1]]);
-    setCrossing(false);
+    setCrossing(null);
     if (isBreedError(born)) {
       setCrossError(born);
       return;
     }
     setFreshIds((f) => new Set([...f, ...born]));
     setSelected([]);
-    setTab("lineage");
     toast(`${born.length} new ideas bred`);
   }
 
@@ -473,6 +477,7 @@ export function ResultView({
                 onToggle={toggleSelected}
                 freshIds={freshIds}
                 stored={stored}
+                pending={crossing}
               />
             </TabPanel>
           )}
@@ -484,7 +489,7 @@ export function ResultView({
               selected={selected}
               onRemove={toggleSelected}
               onCross={cross}
-              crossing={crossing}
+              crossing={crossing !== null}
               error={crossError}
             />
           )}
@@ -544,7 +549,11 @@ function RejudgeBox({ result, ownKey }: { result: Result; ownKey: boolean }) {
           {busy ? "Judging…" : "Get verdict"}
         </button>
       </div>
-      {busy && <p role="status" className="mt-2 text-xs text-slate-500">The judge is reading everything. This can take a minute or two.</p>}
+      {busy && (
+        <div className="mt-4 rounded-2xl border border-line bg-surface/70">
+          <CookingLoader compact lines={JUDGE_LINES} progress="The judge is reading everything. This can take a minute or two." />
+        </div>
+      )}
       {error && (
         <p role="alert" className="mt-2 text-sm text-rose-700">
           {error.error}{" "}
