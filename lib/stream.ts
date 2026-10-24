@@ -25,8 +25,9 @@ export type StreamEvent =
   | { type: "version"; version: Version } // one direction finished (any order)
   | { type: "take"; take: BrainyTake | null } // null = the judge failed
   // Fatal: nothing more is coming. outOfJuice = the server key's free fuel is out;
-  // keyProblem = the visitor's own key was refused or is empty.
-  | { type: "error"; error: string; outOfJuice?: boolean; keyProblem?: boolean }
+  // keyProblem = the visitor's own key was refused or is empty; busy = the models are busy.
+  // The run was given back, so `remaining` is the free-run count after the refund.
+  | { type: "error"; error: string; outOfJuice?: boolean; keyProblem?: boolean; busy?: boolean; remaining?: number | null }
   // fuelOut = the shared pool ran dry during this run (results may be partial).
   | { type: "done"; sharedLeft?: number | null; fuelOut?: boolean };
 

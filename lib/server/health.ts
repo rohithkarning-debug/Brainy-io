@@ -15,6 +15,38 @@ const DOWN_MS = 60 * 60 * 1000;
 
 const memory = new Map<string, string>();
 
+// Models OpenRouter refuses to serve to apps like ours at all ("only available
+// on agentic harnesses"). Kept in their own hash, with no expiry on the key, so
+// they're dropped from the model list for DENY_MS and never tried meanwhile.
+const DENY_KEY = "brainy:denied";
+const DENY_MS = 30 * 24 * 60 * 60 * 1000;
+const AGENTIC_ONLY = /only available on agentic harness/i;
+const deniedMemory = new Map<string, number>();
+
+/** Model ids on the denylist right now. Never throws. */
+export async function getDenied(): Promise<Set<string>> {
+  try {
+    const raw = redis ? await redis.hgetall<Record<string, unknown>>(DENY_KEY) : Object.fromEntries(deniedMemory);
+    return new Set(Object.entries(raw ?? {}).filter(([, until]) => Number(until) > Date.now()).map(([id]) => id));
+  } catch (err) {
+    console.warn("Model denylist read failed:", err instanceof Error ? err.message : err);
+    return new Set();
+  }
+}
+
+async function deny(model: string) {
+  const until = Date.now() + DENY_MS;
+  if (!redis) {
+    deniedMemory.set(model, until);
+    return;
+  }
+  try {
+    await redis.hset(DENY_KEY, { [model]: until });
+  } catch (err) {
+    console.warn("Model denylist write failed:", err instanceof Error ? err.message : err);
+  }
+}
+
 type Flag = { status: Exclude<ModelHealth, "available">; until: number };
 
 function parse(value: unknown): Flag | null {
@@ -62,6 +94,7 @@ async function mark(model: string, status: Flag["status"], ms: number) {
 export function noteFailure(model: string, err: unknown): Promise<void> {
   if (isAuthError(err) || isKeyLimitError(err)) return Promise.resolve();
   const status = httpStatus(err);
+  if (status === 403 && err instanceof Error && AGENTIC_ONLY.test(err.message)) return deny(model);
   const timedOut = err instanceof Error && err.name === "TimeoutError";
   // 404: no longer offered. 403: refused for every request like ours (e.g. a
   // free model OpenRouter now limits to "agentic harnesses"); a moderation

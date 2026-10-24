@@ -6,7 +6,7 @@
 // Server-only (reads env vars).
 
 import { getCatalog } from "@/lib/server/catalog";
-import { getHealth } from "@/lib/server/health";
+import { getDenied, getHealth } from "@/lib/server/health";
 import { AUTO_GENERATORS, MAX_GENERATORS, type ModelInfo } from "@/lib/run-plan";
 
 // Free models known to follow the JSON shapes well go first in Auto; the
@@ -30,11 +30,15 @@ const ENV_JUDGE = process.env.JUDGE_MODEL?.trim();
 // failing direction can't eat the shared pool.
 const CHAIN_LENGTH = 3;
 
-/** Every usable model with its health. Paid models only when asked for (own-key users). */
+/**
+ * Every usable model with its health. Paid models only when asked for
+ * (own-key users). Denylisted models (lib/server/health.ts) are left out, so
+ * neither the pickers nor any fallback chain ever offers them.
+ */
 export async function modelList({ paid = false }: { paid?: boolean } = {}): Promise<ModelInfo[]> {
-  const [catalog, health] = await Promise.all([getCatalog(), getHealth()]);
+  const [catalog, health, denied] = await Promise.all([getCatalog(), getHealth(), getDenied()]);
   return catalog
-    .filter((m) => paid || m.free)
+    .filter((m) => (paid || m.free) && !denied.has(m.id))
     .map((m) => ({ ...m, health: health[m.id] ?? "available" }));
 }
 

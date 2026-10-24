@@ -189,7 +189,10 @@ async function execute(id: string, input: RunInput) {
           break;
         case "error":
           finished = true;
-          if (event.outOfJuice) setRemaining(remaining ?? null, true);
+          // A failed run is given back, so the count is the refunded one.
+          if (event.remaining !== undefined || event.outOfJuice) {
+            setRemaining(event.remaining !== undefined ? event.remaining : (remaining ?? null), event.outOfJuice || undefined);
+          }
           update(id, () => ({
             status: "error",
             error: event.error,

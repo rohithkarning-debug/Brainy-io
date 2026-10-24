@@ -12,6 +12,8 @@
 //
 // On the server's key a run only ever uses free models, and first reserves
 // its estimated model calls from the shared free pool (lib/server/quota.ts).
+// If nothing at all comes back, the run and those calls are given back.
+// The run itself lives in lib/server/expand-run.ts.
 //
 // Signed out: 401 with { error }. Never trust the page to check this.
 //
@@ -22,16 +24,14 @@
 
 import { NextResponse } from "next/server";
 import { MAX_IDEA_LENGTH } from "@/lib/limits";
-import { generateVersion, writeSearchQueries, type BrainyTake, type CallOptions, type Version } from "@/lib/openrouter";
-import { PURPOSES, isPurpose, type Purpose } from "@/lib/purposes";
+import { isPurpose } from "@/lib/purposes";
 import { checkUsage } from "@/lib/ratelimit";
-import { defaultBaseline, estimateCalls, isRunSize, pickDirections, roundRobin, type RunSize } from "@/lib/run-plan";
+import { defaultBaseline, estimateCalls, isRunSize, pickDirections, type RunSize } from "@/lib/run-plan";
 import { readModelChoice } from "@/lib/server/breed-input";
-import { GENERIC_ERROR, admit, explainFailure, getVisitor, identify } from "@/lib/server/guard";
-import { runJudge } from "@/lib/server/judge-input";
-import { chainFor, lineup, type Lineup } from "@/lib/server/models";
+import { runIdea } from "@/lib/server/expand-run";
+import { GENERIC_ERROR, admit, getVisitor, identify, refundAdmission, type Failure } from "@/lib/server/guard";
+import { lineup } from "@/lib/server/models";
 import { poolStatus } from "@/lib/server/quota";
-import { runSearches, skipAll, type SearchReport, type SearchResult } from "@/lib/search";
 import { STREAM_CONTENT_TYPE, type RunPlanInfo, type StreamEvent } from "@/lib/stream";
 import { LENGTHS, isLength, isTone, styleInstruction, type AnswerLength, type Tone } from "@/lib/style";
 
@@ -46,14 +46,6 @@ const BUDGET_MS = (maxDuration - 10) * 1000; // a little room to close the strea
 
 // Always run fresh: remaining-run counts must never be cached.
 export const dynamic = "force-dynamic";
-
-// The baseline uses a plain prompt: "what a typical AI would say".
-const BASELINE_PROMPT =
-  "You are a helpful assistant. Turn the user's idea into a finished concept.";
-
-// Shared framing so every direction still produces a concrete, finished concept.
-const DIRECTION_PREFIX =
-  "You are a creative strategist. Turn the user's half-baked idea into a specific, finished concept. Constraint: ";
 
 // The count is per signed-in user: never let a browser or proxy reuse it.
 const NO_STORE = { headers: { "Cache-Control": "private, no-store" } };
@@ -130,6 +122,11 @@ export async function POST(req: Request) {
           // The visitor left mid-write; nothing to do.
         }
       };
+      // Nothing came back: give the run and its shared calls back, then say why.
+      const fail = async (failure: Failure) => {
+        const remaining = await refundAdmission(caller, admission);
+        send({ type: "error", ...failure, ...(!caller.ownKey && { remaining }) });
+      };
 
       try {
         const models = await lineup({ ownKey: caller.ownKey, ...choice });
@@ -147,7 +144,7 @@ export async function POST(req: Request) {
           plan,
           ...(!caller.ownKey && { remaining: usage.remaining, sharedLeft: admission.sharedLeft }),
         });
-        await runAll({
+        const failure = await runIdea({
           idea,
           purpose,
           directions,
@@ -166,9 +163,10 @@ export async function POST(req: Request) {
           ownKey: caller.ownKey,
           send,
         });
+        if (failure) await fail(failure);
       } catch (err) {
         console.warn("Run failed:", err instanceof Error ? err.message : err);
-        send({ type: "error", error: GENERIC_ERROR });
+        await fail({ error: GENERIC_ERROR });
       } finally {
         // Hand back reserved calls the run didn't make, then report what's left.
         await meter.finish();
@@ -199,114 +197,4 @@ export async function POST(req: Request) {
       "X-Accel-Buffering": "no",
     },
   });
-}
-
-// The whole run. Each piece is sent the moment it finishes.
-async function runAll({
-  idea,
-  purpose,
-  directions,
-  plan,
-  models,
-  options,
-  generationDeadline,
-  judgeDeadline,
-  tavilyKey,
-  ownKey,
-  send,
-}: {
-  idea: string;
-  purpose: Purpose;
-  directions: { label: string; prompt: string }[];
-  plan: RunPlanInfo;
-  models: Lineup;
-  options: CallOptions;
-  generationDeadline: number;
-  judgeDeadline: number;
-  tavilyKey?: string;
-  ownKey: boolean;
-  send: (event: StreamEvent) => void;
-}) {
-  const { signal } = options;
-  const generating = { ...options, deadline: generationDeadline };
-
-  // 2. Search for similar existing work. This chain (write queries -> search)
-  // runs at the same time as the idea generation below, so it adds little wait.
-  // It never throws: if anything fails we just get fewer (or no) results.
-  const sources = PURPOSES[purpose].sources;
-  const searchPromise: Promise<{ results: SearchResult[]; report: SearchReport }> = (
-    plan.search
-      ? writeSearchQueries(chainFor(models.fallbacks[0] ?? models.generators[0], models.fallbacks), idea, purpose, generating)
-          .then((queries) => runSearches(sources, queries, { tavilyKey }))
-          .catch((err) => {
-            console.warn("Could not write search queries:", err instanceof Error ? err.message : err);
-            return { results: [], report: skipAll(sources, "couldn't write search queries") };
-          })
-      : Promise.resolve({ results: [], report: skipAll(sources, "turned off for this run") })
-  ).then((search) => {
-    send({ type: "search", search: search.report, results: search.results });
-    return search;
-  });
-
-  // 3. Baseline call (optional), on the first generator.
-  const baselinePromise: Promise<Version | null> = plan.baseline
-    ? generateVersion(chainFor(models.generators[0], models.fallbacks), BASELINE_PROMPT, idea, purpose, generating).then(
-        (result): Version => {
-          const version = { ...result, direction: "Baseline" };
-          send({ type: "baseline", version });
-          return version;
-        }
-      )
-    : Promise.resolve(null);
-
-  // 4. One call per direction, spread round-robin across the chosen models.
-  // Each falls back through the healthy free models if its own model fails.
-  const assigned = roundRobin(directions.length, models.generators);
-  const directionPromises = directions.map((d, i) =>
-    generateVersion(chainFor(assigned[i], models.fallbacks, i + 1), DIRECTION_PREFIX + d.prompt, idea, purpose, generating).then(
-      (result): Version => {
-        const version = { ...result, direction: d.label };
-        send({ type: "version", version });
-        return version;
-      }
-    )
-  );
-
-  // Promise.allSettled waits for ALL calls and never throws,
-  // so one failing model doesn't break the others.
-  const [search, [baselineResult, ...directionResults]] = await Promise.all([
-    searchPromise,
-    Promise.allSettled([baselinePromise, ...directionPromises]),
-  ]);
-  if (signal?.aborted) return;
-
-  // 5. Keep only the calls that succeeded; log the failures for debugging.
-  const versions: Version[] = [];
-  for (const r of directionResults) {
-    if (r.status === "fulfilled") versions.push(r.value);
-    else console.warn("Skipped a version:", r.reason?.message ?? r.reason);
-  }
-
-  let baseline: Version | null = null;
-  if (baselineResult.status === "fulfilled") baseline = baselineResult.value;
-  else console.warn("Baseline failed:", baselineResult.reason?.message ?? baselineResult.reason);
-
-  if (!baseline && versions.length === 0) {
-    console.warn("All models failed");
-    // Out of fuel, or the visitor's own key refused: a clearer note than a generic error.
-    const reasons = [baselineResult, ...directionResults].flatMap((r) => (r.status === "rejected" ? [r.reason] : []));
-    send({ type: "error", ...explainFailure(reasons, ownKey) });
-    return;
-  }
-
-  // 6. Brainy's Take, with whatever time is left. If the judge fails we still
-  // keep the versions, and the page offers "Try another judge".
-  let take: BrainyTake | null = null;
-  try {
-    const all = baseline ? [baseline, ...versions] : versions;
-    take = await runJudge(models.judges, idea, purpose, all, search, { ...options, deadline: judgeDeadline });
-  } catch (err) {
-    console.warn("Judge failed:", err instanceof Error ? err.message : err);
-  }
-  send({ type: "take", take });
 }

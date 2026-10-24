@@ -16,7 +16,7 @@ export type CatalogModel = {
 };
 
 const MODELS_URL = "https://openrouter.ai/api/v1/models";
-const CACHE_KEY = "brainy:catalog:v1";
+const CACHE_KEY = "brainy:catalog:v2"; // bump when the filter changes, so the cached list is rebuilt
 const CACHE_SECONDS = 60 * 60;
 const TIMEOUT_MS = 8_000;
 
@@ -26,6 +26,10 @@ const MIN_CONTEXT = 32_000;
 const MIN_PARAMS_B = 12;
 // Free models built for something else: safety classifiers, code-only or tiny variants.
 const WEAK = /(safety|guard|moderat|embed|rerank|code|coder|nano|tiny|\bxs\b|-xs-)/i;
+// Listed as free, but OpenRouter only serves them to "agentic harnesses" (HTTP 403
+// for apps like Brainy). Any other model that answers that way is denylisted
+// automatically (lib/server/health.ts).
+const DENIED = new Set(["thinkingmachines/inkling-small:free", "thinkingmachines/inkling:free"]);
 
 type RawModel = {
   id?: string;
@@ -50,7 +54,7 @@ export function toCatalog(raw: RawModel[]): CatalogModel[] {
   const now = Date.now();
   const out: CatalogModel[] = [];
   for (const m of raw) {
-    if (typeof m.id !== "string" || !m.id.includes("/")) continue;
+    if (typeof m.id !== "string" || !m.id.includes("/") || DENIED.has(m.id)) continue;
     if (!(m.architecture?.output_modalities ?? ["text"]).includes("text")) continue;
     if ((m.context_length ?? 0) < MIN_CONTEXT) continue;
     if (m.expiration_date && Date.parse(m.expiration_date) < now) continue;

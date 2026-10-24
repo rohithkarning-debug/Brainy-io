@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { KEY_HEADERS, isValidKey, type KeyProvider } from "@/lib/key-format";
 import { BYOK_RUNS_PER_USER_PER_DAY, REJUDGES_PER_USER_PER_DAY, RUNS_PER_USER_PER_DAY } from "@/lib/limits";
-import { OutOfCallsError, httpStatus, isAuthError, isDailyLimitError, isKeyLimitError, isTimeout } from "@/lib/openrouter";
+import { OutOfCallsError, UnusableReplyError, httpStatus, isAuthError, isDailyLimitError, isKeyLimitError, isTimeout } from "@/lib/openrouter";
 import { checkUsage, consumeRejudge, consumeRun, getClientIp, refundRun, type Usage, type Visitor } from "@/lib/ratelimit";
 import { createMeter, release, reserve, type Reservation, type RunMeter } from "@/lib/server/quota";
 
@@ -158,7 +158,10 @@ export function explainFailure(reasons: unknown[], ownKey: boolean): Failure {
     return { error: FUEL_OUT, outOfJuice: true };
   }
   if (ownKey && reasons.some((r) => httpStatus(r) === 402 || isKeyLimitError(r))) return { error: KEY_EMPTY, keyProblem: true };
-  if (reasons.length > 0 && reasons.every(modelTrouble)) return { error: ALL_BUSY, busy: true };
+  // Busy: every failure was the models' own trouble, or an unusable reply alongside it
+  // (e.g. two models refused and a third answered gibberish). Only bad replies: generic.
+  const modelsMisbehaved = reasons.every((r) => modelTrouble(r) || r instanceof UnusableReplyError);
+  if (reasons.length > 0 && modelsMisbehaved && reasons.some(modelTrouble)) return { error: ALL_BUSY, busy: true };
   return { error: GENERIC_ERROR };
 }
 
@@ -173,19 +176,24 @@ export function failureResponse(reasons: unknown[], ownKey: boolean) {
 }
 
 /**
- * A request that used up a run failed on our side: give the run back, and
- * every shared call it took, then reply like failureResponse. `remaining` is
- * the visitor's free runs after the refund, so the page shows the right count.
+ * A request that used up a run failed on our side: give back the run and every
+ * shared call it took. Returns the visitor's free runs left afterwards (null
+ * when unknown, on their own key, or if the refund itself failed).
  */
-export async function refundAndFail(caller: Caller, admission: Admission, reasons: unknown[]) {
-  const failure = explainFailure(reasons, caller.ownKey);
-  let remaining: number | null = null;
+export async function refundAdmission(caller: Caller, admission: Admission): Promise<number | null> {
   try {
     await admission.meter.refund();
-    remaining = await refundRun(caller.visitor, { ownKey: caller.ownKey });
+    return await refundRun(caller.visitor, { ownKey: caller.ownKey });
   } catch (err) {
     console.warn("Refund failed:", err instanceof Error ? err.message : err);
+    return null;
   }
+}
+
+/** refundAdmission, then reply like failureResponse (with the refunded run count). */
+export async function refundAndFail(caller: Caller, admission: Admission, reasons: unknown[]) {
+  const failure = explainFailure(reasons, caller.ownKey);
+  const remaining = await refundAdmission(caller, admission);
   return NextResponse.json(
     { ...failure, fuelOut: failure.outOfJuice, refunded: true, ...(!caller.ownKey && { remaining }) },
     { status: failureStatus(failure) }

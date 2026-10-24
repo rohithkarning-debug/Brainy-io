@@ -102,6 +102,9 @@ class HttpError extends Error {
   }
 }
 
+/** A model answered, but not with usable JSON (missing, cut off, or missing a field), twice. */
+export class UnusableReplyError extends Error {}
+
 /** The shared free pool ran dry mid-run, so this call was never sent. */
 export class OutOfCallsError extends Error {
   constructor() {
@@ -283,7 +286,7 @@ async function callAndParse<T>(
     } catch (err) {
       if (settings.signal?.aborted) throw err;
       console.warn(`Unusable reply from ${reply.model}:`, err instanceof Error ? err.message : err);
-      lastError = err;
+      lastError = new UnusableReplyError(`${reply.model}: ${err instanceof Error ? err.message : String(err)}`);
       const next = remaining.slice(remaining.indexOf(reply.model) + 1);
       remaining = next.length > 0 ? next : [reply.model];
       system += STRICTER;
@@ -334,19 +337,20 @@ export async function generateVersion(
   const styleLine = style ? `\n\n${style}` : "";
   const system = `${systemPrompt}\n\n${guidance}${styleLine}\n\nRespond with ONLY a JSON object, no markdown, no extra text, in exactly this shape:\n${shape}`;
 
-  const { text, model } = await callWithFallback(models, system, idea, { maxTokens, signal, apiKey, meter, deadline });
-  const obj = extractJSON(text);
-
-  // Make sure every field exists and is a non-empty string.
-  for (const key of ["title", "pitch", ...fields.map((f) => f.key)]) {
-    if (!isText(obj[key])) throw new Error(`Missing field "${key}"`);
-  }
-  return {
-    title: obj.title,
-    pitch: obj.pitch,
-    details: Object.fromEntries(fields.map((f) => [f.key, obj[f.key]])),
-    model,
-  };
+  // An unusable reply (no JSON, cut off, a field missing) gets one stricter retry.
+  return callAndParse(models, system, idea, { maxTokens, signal, apiKey, meter, deadline }, (text, model) => {
+    const obj = extractJSON(text);
+    // Make sure every field exists and is a non-empty string.
+    for (const key of ["title", "pitch", ...fields.map((f) => f.key)]) {
+      if (!isText(obj[key])) throw new Error(`Missing field "${key}"`);
+    }
+    return {
+      title: obj.title,
+      pitch: obj.pitch,
+      details: Object.fromEntries(fields.map((f) => [f.key, obj[f.key]])),
+      model,
+    };
+  });
 }
 
 const QUERY_PROMPT = `You write search queries that find things which ALREADY EXIST and resemble a user's idea, so we can check how original it is.
@@ -373,22 +377,15 @@ export async function writeSearchQueries(
 ): Promise<SearchQueries> {
   const { label, searchHint } = PURPOSES[purpose];
   const user = `Purpose: ${label}. Look for: ${searchHint}.\n\nIdea:\n${idea}`;
-  const { text } = await callWithFallback(models, QUERY_PROMPT, user, {
-    temperature: 0.3,
-    timeoutMs: 15_000,
-    maxTokens: 300,
-    signal,
-    apiKey,
-    meter,
-    deadline,
-  });
-  const obj = extractJSON(text);
-
+  const settings = { temperature: 0.3, timeoutMs: 15_000, maxTokens: 300, signal, apiKey, meter, deadline };
   const clean = (list: unknown, max: number) =>
     Array.isArray(list) ? list.filter(isText).map((q) => q.trim().slice(0, 200)).slice(0, max) : [];
-  const queries = { web: clean(obj.web, 4), keywords: clean(obj.keywords, 3) };
-  if (queries.web.length === 0 && queries.keywords.length === 0) throw new Error("No queries returned");
-  return queries;
+  return callAndParse(models, QUERY_PROMPT, user, settings, (text) => {
+    const obj = extractJSON(text);
+    const queries = { web: clean(obj.web, 4), keywords: clean(obj.keywords, 3) };
+    if (queries.web.length === 0 && queries.keywords.length === 0) throw new Error("No queries returned");
+    return queries;
+  });
 }
 
 // The judge's instructions. Step 1 changes depending on whether a live search
