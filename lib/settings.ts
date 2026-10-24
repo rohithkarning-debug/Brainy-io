@@ -4,6 +4,7 @@
 
 import { useSyncExternalStore } from "react";
 import { createLocalStore } from "@/lib/local-store";
+import { MAX_GENERATORS, defaultBaseline, isRunSize, type RunOptions, type RunSize } from "@/lib/run-plan";
 import { isLength, isTone, type AnswerLength, type Tone } from "@/lib/style";
 
 export type Theme = "light" | "dark";
@@ -15,6 +16,12 @@ export type Settings = {
   tone: Tone;
   fontSize: FontSize;
   animations: boolean;
+  // Run setup (the Ask page's Advanced panel). null = follow the default.
+  runSize: RunSize | null; // null = Quick without your own key, Full with one
+  baseline: boolean | null; // null = on for Full, off otherwise
+  liveSearch: boolean;
+  models: string[]; // generator models; [] = Auto
+  judge: string; // "auto" or a model id
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -23,6 +30,11 @@ export const DEFAULT_SETTINGS: Settings = {
   tone: "simple",
   fontSize: "md",
   animations: true,
+  runSize: null,
+  baseline: null,
+  liveSearch: true,
+  models: [],
+  judge: "auto",
 };
 
 export const SETTINGS_KEY = "brainy:settings";
@@ -36,7 +48,20 @@ function parse(raw: unknown): Settings {
     tone: isTone(s.tone) ? s.tone : DEFAULT_SETTINGS.tone,
     fontSize: s.fontSize === "sm" || s.fontSize === "lg" ? s.fontSize : DEFAULT_SETTINGS.fontSize,
     animations: typeof s.animations === "boolean" ? s.animations : DEFAULT_SETTINGS.animations,
+    runSize: isRunSize(s.runSize) ? s.runSize : null,
+    baseline: typeof s.baseline === "boolean" ? s.baseline : null,
+    liveSearch: typeof s.liveSearch === "boolean" ? s.liveSearch : DEFAULT_SETTINGS.liveSearch,
+    models: Array.isArray(s.models)
+      ? [...new Set(s.models.filter((m): m is string => typeof m === "string" && m.length <= 120))].slice(0, MAX_GENERATORS)
+      : [],
+    judge: typeof s.judge === "string" && s.judge.length <= 120 ? s.judge : DEFAULT_SETTINGS.judge,
   };
+}
+
+/** The run setup these settings describe, filling in the defaults for this visitor. */
+export function runOptions(s: Settings, ownKey: boolean): RunOptions {
+  const size = s.runSize ?? (ownKey ? "full" : "quick");
+  return { size, baseline: s.baseline ?? defaultBaseline(size), search: s.liveSearch, models: s.models, judge: s.judge };
 }
 
 const store = createLocalStore(SETTINGS_KEY, parse);

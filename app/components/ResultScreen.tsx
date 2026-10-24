@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useState } from "react";
 import { BrainyTakeCard } from "@/app/components/BrainyTakeCard";
 import { CookingLoader, SkeletonCard } from "@/app/components/CookingLoader";
 import { useCopyShare } from "@/app/components/CopyShare";
 import { CrossBar, LineagePanel } from "@/app/components/Lineage";
+import { JudgeSelect } from "@/app/components/ModelPicker";
 import { BuiltBeforeCard, PapersCard } from "@/app/components/PriorWorkCards";
 import { useToast } from "@/app/components/Toast";
 import { ActionButton, SectionTitle, TabPanel, Tabs } from "@/app/components/ui";
@@ -16,10 +17,11 @@ import { formatDate, resultToText, sourceList } from "@/lib/format";
 import { togglePin, useHistory, type Result } from "@/lib/history";
 import { useKeys } from "@/lib/keys";
 import { directionNodeId, readLineage, type Lineage, type NodeId } from "@/lib/lineage";
+import { useModels } from "@/lib/models";
 import { PURPOSES } from "@/lib/purposes";
-import { startRun, stopRun, useRun } from "@/lib/run";
+import { rejudge, startRun, stopRun, useRun } from "@/lib/run";
 import { setCooked } from "@/lib/reveal";
-import { useMotionAllowed, useSettings } from "@/lib/settings";
+import { runOptions, updateSettings, useMotionAllowed, useSettings } from "@/lib/settings";
 import { LENGTHS, TONES } from "@/lib/style";
 
 type Tab = "verdict" | "directions" | "baseline" | "lineage";
@@ -75,7 +77,10 @@ export function ResultView({
 
   const { purpose } = result;
   const cooking = result.status === "cooking";
-  const directions = PURPOSES[purpose].directions;
+  // The directions this run used (older results ran all of them, plus the baseline).
+  const planned = result.plan?.directions;
+  const directions = PURPOSES[purpose].directions.filter((d) => !planned || planned.includes(d.label));
+  const baselineOn = result.plan?.baseline ?? true;
   const hasContent = Boolean(result.baseline || result.versions.length > 0 || result.take);
 
   // ---------- The reveal: monochrome while cooking, colour once it's done ----------
@@ -132,9 +137,10 @@ export function ResultView({
   // The direction the judge built its pick on gets highlighted after the reveal.
   const pickedDirection = result.take?.pick.basedOn.trim().toLowerCase();
 
-  // Same idea and purpose, with the current answer settings.
+  // Same idea and purpose, with the current answer and run settings.
   function regenerate() {
-    const id = startRun({ idea: result.idea, purpose, length: settings.length, tone: settings.tone });
+    const run = runOptions(settings, hasOwnKey);
+    const id = startRun({ idea: result.idea, purpose, length: settings.length, tone: settings.tone, ...run });
     router.push(`/result/${id}`);
   }
 
@@ -144,7 +150,7 @@ export function ResultView({
 
   // The honest status line under the cooking animation.
   const arrived = result.versions.length + (result.baseline ? 1 : 0);
-  const total = directions.length + 1;
+  const total = directions.length + (baselineOn ? 1 : 0);
   const progress = [
     result.search
       ? result.search.ran.length > 0
@@ -273,6 +279,15 @@ export function ResultView({
             Retry
           </ActionButton>
         </div>
+      ) : result.ranDry ? (
+        <p className="mt-8 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          Today&apos;s shared free requests ran out mid-run, so some pieces may be missing.{" "}
+          {!hasOwnKey && (
+            <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
+              Add your own free OpenRouter key <span aria-hidden>→</span>
+            </Link>
+          )}
+        </p>
       ) : result.status === "stopped" ? (
         <p className="mt-8 max-w-3xl rounded-xl border border-line bg-surface p-4 text-sm text-slate-600 shadow-card">
           You stopped this run.{" "}
@@ -313,11 +328,14 @@ export function ResultView({
                 )}
               </div>
             ) : (
-              <p className="rounded-xl border border-line bg-surface p-4 text-sm text-slate-500 shadow-card">
-                {result.status === "done"
-                  ? "Brainy's Take couldn't be generated this time, but the directions are ready."
-                  : "The run ended before the judge could weigh in, but the directions that arrived are ready."}
-              </p>
+              <div className="rounded-xl border border-line bg-surface p-4 shadow-card">
+                <p className="text-sm text-slate-500">
+                  {result.status === "done"
+                    ? "Brainy's Take couldn't be generated this time, but the directions are ready."
+                    : "The run ended before the judge could weigh in, but the directions that arrived are ready."}
+                </p>
+                {!example && hasContent && <RejudgeBox result={result} ownKey={hasOwnKey} />}
+              </div>
             )}
           </TabPanel>
 
@@ -376,6 +394,8 @@ export function ResultView({
             <div className="max-w-xl">
               {result.baseline ? (
                 <VersionCard version={result.baseline} purpose={purpose} muted live={live} />
+              ) : !baselineOn ? (
+                <p className="text-sm text-slate-500">The baseline was off for this run. Turn it on under Advanced on the Ask page.</p>
               ) : cooking ? (
                 <SkeletonCard label="Baseline" />
               ) : (
@@ -416,6 +436,71 @@ export function ResultView({
   );
 }
 
+// "Try another judge": re-runs only the judge on this result's directions and
+// kept search results. Doesn't use up a run.
+function RejudgeBox({ result, ownKey }: { result: Result; ownKey: boolean }) {
+  const settings = useSettings();
+  const models = useModels(ownKey);
+  const selectId = useId();
+  const [judge, setJudge] = useState(settings.judge);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<{ error: string; outOfJuice?: boolean } | null>(null);
+  const toast = useToast();
+
+  async function getVerdict() {
+    setBusy(true);
+    setError(null);
+    const failed = await rejudge(result.id, judge);
+    setBusy(false);
+    if (failed) setError(failed);
+    else toast("Brainy's Take is ready");
+  }
+
+  return (
+    <div className="mt-4 border-t border-line pt-4">
+      <label htmlFor={selectId} className="text-sm font-semibold text-slate-950">
+        Try another judge
+      </label>
+      <p className="mt-0.5 text-xs text-slate-500">
+        Re-runs only the verdict on these directions{result.searchResults ? " and search results" : ""}. It doesn&apos;t
+        count as a run{ownKey ? "" : ", but uses 1 shared free request"}.
+        {!result.searchResults && result.search && result.search.ran.length > 0 && " This older result didn't keep its search results, so the verdict won't cite them."}
+      </p>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <JudgeSelect
+          id={selectId}
+          models={models}
+          value={judge}
+          onChange={(j) => {
+            setJudge(j);
+            updateSettings({ judge: j });
+          }}
+          ownKey={ownKey}
+        />
+        <button
+          type="button"
+          onClick={getVerdict}
+          disabled={busy}
+          className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-accent px-5 py-2 text-sm font-semibold text-on-accent shadow-card transition hover:bg-accent-dark disabled:cursor-wait disabled:opacity-60"
+        >
+          {busy ? "Judging…" : "Get verdict"}
+        </button>
+      </div>
+      {busy && <p role="status" className="mt-2 text-xs text-slate-500">The judge is reading everything. This can take a minute or two.</p>}
+      {error && (
+        <p role="alert" className="mt-2 text-sm text-rose-700">
+          {error.error}{" "}
+          {error.outOfJuice && !ownKey && (
+            <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
+              Add your own key <span aria-hidden>→</span>
+            </Link>
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // The server key's free fuel is out for today (daily pool used up, or every
 // model out of credits). The way forward is the visitor's own key.
 function OutOfJuice() {
@@ -426,7 +511,7 @@ function OutOfJuice() {
         Brainy&apos;s free fuel is out for today
       </h2>
       <p className="mt-2 leading-relaxed text-slate-600">
-        Everyone&apos;s free runs share one daily tank, and it&apos;s empty. Add your own free OpenRouter key to keep
+        Everyone&apos;s free runs share one daily tank of model requests, and it&apos;s empty until midnight UTC. Add your own free OpenRouter key to keep
         going. It stays in this browser and your runs on it don&apos;t touch the free limit.
       </p>
       <div className="mt-6 flex flex-wrap gap-3">

@@ -19,10 +19,33 @@ Redis config is read from `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`,
 falling back to `KV_REST_API_URL` / `KV_REST_API_TOKEN` (the names Vercel's
 Upstash integration creates), so either pair works.
 
-`JUDGE_MODEL` picks the model behind Brainy's Take (any OpenRouter model ID); it
-defaults to a free one. If any model call gets HTTP 402 (out of credits), 429
-(rate-limited) or 5xx, Brainy retries with the free models in `FREE_MODELS`
-(`lib/openrouter.ts`). Free models have their own daily request caps on OpenRouter.
+## Free-only mode: run size, models and judge
+
+Runs on the server's `OPENROUTER_API_KEY` only ever use **free** OpenRouter models.
+
+- **Run size** (Ask page → Advanced, remembered in Settings): Quick = 3 directions
+  (~5 model calls), Standard = 6 (~8), Full = 9 (~12). The estimate is directions
+  + baseline + search-query writer + judge (`estimateCalls` in `lib/run-plan.ts`);
+  the baseline is on by default only for Full, and both it and live search can be
+  toggled. Quick is the default without your own key, Full with one. Which
+  directions a smaller run keeps is set per purpose in `lib/run-plan.ts`.
+- **Models**: `lib/server/catalog.ts` fetches OpenRouter's models API, keeps
+  free text models with at least 32k context, drops small (< 12B by id) and
+  special-purpose ones (safety, code, nano...), and caches the list for an hour
+  in Upstash. Users pick 1-4 generators (default Auto: 3 healthy free models);
+  directions are spread round-robin across them, each with up to 2 healthy free
+  fallbacks.
+- **Health** (`lib/server/health.ts`): a 429, 5xx or timeout marks a model busy
+  for 10 minutes, a 404 unavailable for an hour, in one Upstash hash. Pickers
+  show the dots; Auto and every fallback chain skip flagged models.
+- **Judge**: Auto walks healthy free judges (`JUDGE_MODEL` first if it's a free
+  model in the list), or the user picks one. Generation must finish 115s into
+  the run, so the judge always gets the remaining ~155s. If the verdict still
+  fails, **Try another judge** (`POST /api/judge`) re-runs only the judge on the
+  directions and the search results the browser kept with the result. It
+  doesn't use up a run but has its own cap (10/day).
+- **Own key**: users with their own OpenRouter key can also pick paid models,
+  labelled with their price; defaults stay the free Auto picks.
 
 ## Bring your own key
 
@@ -34,10 +57,21 @@ only: they are never stored, logged or echoed back. If a user's key is refused,
 the run fails with "Your key was rejected" rather than quietly using the server key.
 
 Runs on a visitor's own key skip the 5 free runs (an anti-abuse cap of 50/day
-applies). Free runs on the server key share a global daily pool,
-`GLOBAL_DAILY_RUNS` (default 60). When it's used up, or every model on the server
-key returns 402/429, visitors see "Brainy's free fuel is out for today" with a
-link to add their own key.
+applies) and never touch the shared pool.
+
+## The shared free pool
+
+Every model call made on the server key counts against `GLOBAL_DAILY_CALLS`
+(default 45), stored in Upstash per UTC day (`lib/server/quota.ts`). A request
+reserves its estimated calls up front with one atomic Lua script, so concurrent
+runs can't both take the last few; if fewer are left than the estimate, it's
+refused with "Not enough free fuel left today for this run size". Fallbacks and
+retries beyond the estimate take one more each while any are left; once the
+pool is dry, further calls are refused and the run keeps its partial results.
+Unused reservations are handed back at the end, so the count is real calls.
+When OpenRouter answers with its daily free-model limit (`free-models-per-day`),
+the pool is marked out until midnight UTC and visitors see "Brainy's free fuel
+is out for today". The Ask page shows "Shared free requests left today: N".
 
 ## Idea breeding
 
@@ -46,7 +80,7 @@ or any node in the tree) and press **Cross**: one model call (`/api/cross`) bree
 3 offspring that fuse a trait from each parent, each with an "Inherits X from A,
 Y from B" line. Offspring can be crossed again (generation 2, 3, ...), saved, and
 judged per generation (`/api/judge-generation`). Each cross or judge counts as
-one run, or one own-key run.
+one run (or one own-key run) and at least one call from the shared pool.
 
 The tree lives in the stored result as `lineage` (`lib/lineage.ts`, `lib/breed.ts`),
 so History and Saved reopen it; older results simply have none. The Lineage tab
@@ -77,8 +111,8 @@ it is retried once on the next model.
 Google and GitHub sign-in via Auth.js v5 (`auth.ts`), with JWT sessions, so no database.
 Home, About and `/login` are public; `middleware.ts` sends signed-out visitors on
 any other page to `/login?callbackUrl=...`, and `/api/expand` returns 401 on its own
-check. Free runs are limited per user (5), with a looser per-IP backup (15) and a
-global pool (`GLOBAL_DAILY_RUNS`, default 60). Each OAuth app needs these callback URLs:
+check. Free runs are limited per user (5), with a looser per-IP backup (15), and
+share the pool of model calls above. Each OAuth app needs these callback URLs:
 
 - `http://localhost:3000/api/auth/callback/google` and `.../github`
 - `https://brainy-io.vercel.app/api/auth/callback/google` and `.../github`
@@ -87,8 +121,11 @@ global pool (`GLOBAL_DAILY_RUNS`, default 60). Each OAuth app needs these callba
 
 - `app/api/expand/route.ts`: the main run. `POST` streams
   newline-delimited JSON events (`lib/stream.ts`) as each model finishes.
-- `app/api/cross`, `app/api/judge-generation`: idea breeding; `app/api/keys/test`
-  checks a visitor's own key. All model routes share `lib/server/guard.ts`.
+- `app/api/cross`, `app/api/judge-generation`: idea breeding; `app/api/judge`:
+  "Try another judge"; `app/api/models`: the picker's model list with health;
+  `app/api/keys/test` checks a visitor's own key. All model routes share
+  `lib/server/guard.ts` (sign-in, keys, limits) and `lib/server/models.ts` (which
+  models run).
 - `lib/search.ts`: web, GitHub, Devpost (via Tavily) and arXiv searches.
 - `lib/run.ts`: reads that stream in the browser and fills in a live result.
 - `lib/history.ts`, `lib/settings.ts`: history, saved results and settings,

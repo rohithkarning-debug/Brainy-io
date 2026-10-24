@@ -6,7 +6,8 @@ import type { Lineage } from "@/lib/lineage";
 import { createLocalStore } from "@/lib/local-store";
 import type { BrainyTake, Version } from "@/lib/openrouter";
 import type { Purpose } from "@/lib/purposes";
-import type { SearchReport } from "@/lib/search";
+import type { SearchReport, SearchResult } from "@/lib/search";
+import type { RunPlanInfo } from "@/lib/stream";
 import type { AnswerLength, Tone } from "@/lib/style";
 
 // "cooking" only exists while a run is live (see lib/run.ts); stored results
@@ -25,10 +26,16 @@ export type Result = {
   versions: Version[]; // in the order they finished
   take: BrainyTake | null;
   search: SearchReport | null;
+  // What the run did (size, which directions, baseline/search on). Absent on
+  // older results, which always ran every direction plus the baseline.
+  plan?: RunPlanInfo;
+  // The raw search results, kept so "Try another judge" can re-run the verdict. Absent on older results.
+  searchResults?: SearchResult[];
   error?: string;
   limited?: boolean; // the run was refused by the daily limit
   outOfJuice?: boolean; // the server key's free fuel was out (daily pool used up, or every model out of credits)
   keyProblem?: boolean; // the visitor's own key was refused or out of credits
+  ranDry?: boolean; // the shared free pool ran out mid-run, so some pieces may be missing
   pinned?: boolean; // shown on the Saved page; survives "Clear history"
   lineage?: Lineage; // ideas bred from this result (see lib/lineage.ts); absent on older results
 };

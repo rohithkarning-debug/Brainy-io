@@ -16,6 +16,7 @@ import {
 } from "@/lib/lineage";
 import type { Version } from "@/lib/openrouter";
 import { noteUsage } from "@/lib/run";
+import { getSettings } from "@/lib/settings";
 
 /** What went wrong, shaped like a result's notes so the page can reuse them. */
 export type BreedError = { error: string; outOfJuice?: boolean; keyProblem?: boolean; limited?: boolean };
@@ -36,7 +37,9 @@ async function post<T>(url: string, body: unknown): Promise<T | BreedError> {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      if (data.remaining !== undefined || data.fuelOut) noteUsage(data.remaining, data.fuelOut ? true : undefined);
+      if (data.remaining !== undefined || data.fuelOut || data.sharedLeft !== undefined) {
+        noteUsage(data.remaining, data.fuelOut ? true : undefined, data.sharedLeft);
+      }
       return {
         error: data.error ?? `Brainy couldn't answer (HTTP ${res.status}). Please try again.`,
         outOfJuice: Boolean(data.fuelOut),
@@ -109,6 +112,7 @@ export async function judgeGeneration(result: Result, generation: number, offspr
       purpose: result.purpose,
       length: result.length,
       tone: result.tone,
+      judge: getSettings().judge,
       offspring: judged.map((o) => ({ ...asInput(o.direction, o), id: o.id, inherits: o.inherits })),
     }
   );

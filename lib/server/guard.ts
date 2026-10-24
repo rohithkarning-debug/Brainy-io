@@ -1,19 +1,24 @@
 // Shared checks for every route that spends model calls (/api/expand,
 // /api/cross, /api/judge-generation): sign-in, the visitor's own keys, daily
-// limits, and turning model failures into friendly messages. Server-only.
+// limits, the shared free pool, and turning model failures into friendly
+// messages. Server-only.
 
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { KEY_HEADERS, isValidKey, type KeyProvider } from "@/lib/key-format";
-import { BYOK_RUNS_PER_USER_PER_DAY, RUNS_PER_USER_PER_DAY } from "@/lib/limits";
-import { isAuthError, isQuotaError } from "@/lib/openrouter";
-import { consumeRun, getClientIp, type Usage, type Visitor } from "@/lib/ratelimit";
+import { BYOK_RUNS_PER_USER_PER_DAY, REJUDGES_PER_USER_PER_DAY, RUNS_PER_USER_PER_DAY } from "@/lib/limits";
+import { OutOfCallsError, isAuthError, isDailyLimitError, isQuotaError } from "@/lib/openrouter";
+import { checkUsage, consumeRejudge, consumeRun, getClientIp, type Usage, type Visitor } from "@/lib/ratelimit";
+import { createMeter, release, reserve, type Reservation, type RunMeter } from "@/lib/server/quota";
 
 // Shown for any server-side problem. Details go to the logs, never to visitors.
 export const GENERIC_ERROR = "Something went wrong on our side. Please try again.";
 
-// The server key's daily pool is used up, or every model on it is out of credits.
+// The shared free pool is used up for today, or OpenRouter's daily free cap hit.
 export const FUEL_OUT = "Brainy's free fuel is out for today. Add your own free OpenRouter key to keep going.";
+
+// The pool has some calls left, but fewer than this run would need.
+const NOT_ENOUGH = "Not enough free fuel left today for this run size. Try Quick, or add your own key.";
 
 // Shown if Redis is configured but can't be reached. We refuse the run
 // rather than risk unlimited use of the API credits.
@@ -36,7 +41,7 @@ function limitMessage(blockedBy: NonNullable<Usage["blockedBy"]>) {
   if (blockedBy === "ip")
     return "Too many free runs from this network today. Add your own free OpenRouter key to keep going, or come back tomorrow.";
   if (blockedBy === "own-key") return `You've hit today's cap of ${BYOK_RUNS_PER_USER_PER_DAY} runs on your own key. Come back tomorrow!`;
-  return FUEL_OUT;
+  return `You've used today's ${REJUDGES_PER_USER_PER_DAY} judge retries. Come back tomorrow!`;
 }
 
 // The signed-in user and their IP, or null when signed out.
@@ -76,45 +81,79 @@ export async function identify(req: Request): Promise<Caller | NextResponse> {
   return { visitor, keys, ownKey };
 }
 
+export type Admission = {
+  usage: Usage;
+  meter: RunMeter; // pass to every model call, then call meter.finish() at the end
+  sharedLeft?: number | null; // shared free calls left after this reservation (server key only)
+};
+
+const limitHit = (body: Record<string, unknown>) => NextResponse.json({ limitReached: true, ...body }, { status: 429 });
+
 /**
- * Use up one run (a free one, or one on the visitor's own key). Returns the
- * usage, or a ready error response when a limit is hit or Redis is down.
- * `limitReached` tells the UI to show a note; `fuelOut` that the server key's
- * pool is empty, so adding a key is the way forward.
+ * Let a request spend model calls. On the server key it first reserves
+ * `calls` from the shared free pool (refused with "not enough fuel" if the
+ * pool can't cover them), then uses up a run; a "rejudge" uses up a judge
+ * retry instead of a run. On the visitor's own key only their own caps apply.
+ * Returns a ready error response when a limit is hit or Redis is down.
+ * `limitReached` tells the UI to show a note; `fuelOut` that the shared pool
+ * is empty, so adding a key is the way forward.
  */
-export async function takeRun({ visitor, ownKey }: Caller): Promise<Usage | NextResponse> {
-  let usage: Usage;
+export async function admit(
+  { visitor, ownKey }: Caller,
+  { calls, kind = "run" }: { calls: number; kind?: "run" | "rejudge" }
+): Promise<Admission | NextResponse> {
+  const spend = () => (kind === "rejudge" ? consumeRejudge(visitor) : consumeRun(visitor, { ownKey }));
   try {
-    usage = await consumeRun(visitor, { ownKey });
+    if (ownKey) {
+      const usage = await spend();
+      if (usage.blockedBy) return limitHit({ error: limitMessage(usage.blockedBy) });
+      return { usage, meter: createMeter(null) };
+    }
+
+    // Out of free runs is the clearer message, so check that before the pool.
+    if (kind === "run") {
+      const before = await checkUsage(visitor);
+      if (before.blockedBy) return limitHit({ error: limitMessage(before.blockedBy), remaining: before.remaining });
+    }
+
+    const reservation: Reservation = await reserve(calls);
+    if (!reservation.ok) {
+      return reservation.out
+        ? limitHit({ error: FUEL_OUT, fuelOut: true, sharedLeft: 0 })
+        : limitHit({ error: NOT_ENOUGH, notEnough: true, sharedLeft: reservation.left });
+    }
+
+    const usage = await spend();
+    if (usage.blockedBy) {
+      await release(reservation.day, reservation.count);
+      return limitHit({ error: limitMessage(usage.blockedBy), remaining: usage.remaining });
+    }
+    return { usage, meter: createMeter(reservation), sharedLeft: reservation.left };
   } catch (err) {
     console.warn("Usage limit check failed:", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: LIMITS_DOWN }, { status: 503 });
   }
-  if (usage.blockedBy) {
-    return NextResponse.json(
-      {
-        error: limitMessage(usage.blockedBy),
-        limitReached: true,
-        fuelOut: usage.blockedBy === "global",
-        remaining: usage.remaining,
-      },
-      { status: 429 }
-    );
-  }
-  return usage;
 }
 
 export type Failure = { error: string; outOfJuice?: boolean; keyProblem?: boolean };
 
+// Every model was rate-limited by its provider, but nothing is used up.
+const ALL_BUSY = "Every free model is busy right now. Try again in a few minutes, or pick other models under Advanced.";
+
 /**
  * Explain why every model call failed. A refused or empty user key is named
- * as such (we never fall back to the server key behind their back); every
- * server-key call out of credits or rate-limited means the free fuel is out.
+ * as such (we never fall back to the server key behind their back). On the
+ * server key, the shared pool running dry or OpenRouter's daily free cap
+ * means the free fuel is out; plain rate limits mean the models are busy.
  */
 export function explainFailure(reasons: unknown[], ownKey: boolean): Failure {
   if (ownKey && reasons.some(isAuthError)) return { error: KEY_REJECTED, keyProblem: true };
   if (reasons.length > 0 && reasons.every(isQuotaError)) {
-    return ownKey ? { error: KEY_EMPTY, keyProblem: true } : { error: FUEL_OUT, outOfJuice: true };
+    if (ownKey) return { error: KEY_EMPTY, keyProblem: true };
+    if (reasons.some((r) => r instanceof OutOfCallsError || isDailyLimitError(r))) {
+      return { error: FUEL_OUT, outOfJuice: true };
+    }
+    return { error: ALL_BUSY };
   }
   return { error: GENERIC_ERROR };
 }

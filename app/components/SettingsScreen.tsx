@@ -3,10 +3,19 @@
 import type { ReactNode } from "react";
 import { ApiKeys } from "@/app/components/ApiKeys";
 import { useToast } from "@/app/components/Toast";
-import { resetSettings, updateSettings, useSettings, type FontSize, type Settings, type Theme } from "@/lib/settings";
+import { Segmented, Switch, type Choice } from "@/app/components/ui";
+import { useKeys } from "@/lib/keys";
+import { RUN_SIZES, RUN_SIZE_KEYS, estimateCalls } from "@/lib/run-plan";
+import {
+  resetSettings,
+  runOptions,
+  updateSettings,
+  useSettings,
+  type FontSize,
+  type Settings,
+  type Theme,
+} from "@/lib/settings";
 import { LENGTHS, LENGTH_KEYS, TONES, TONE_KEYS } from "@/lib/style";
-
-type Choice<T extends string> = { value: T; label: string; hint?: string };
 
 const THEMES: Choice<Theme>[] = [
   { value: "light", label: "Light", hint: "Default" },
@@ -22,6 +31,8 @@ const FONT_SIZES: Choice<FontSize>[] = [
 export function SettingsScreen() {
   const settings = useSettings();
   const toast = useToast();
+  const ownKey = Boolean(useKeys().openrouter);
+  const run = runOptions(settings, ownKey);
 
   function set<K extends keyof Settings>(key: K, value: Settings[K]) {
     updateSettings({ [key]: value });
@@ -58,18 +69,32 @@ export function SettingsScreen() {
       </Row>
 
       <Row title="Animations" description="Typing effects, fades and the drifting background. Also off when your device asks for reduced motion.">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={settings.animations}
-          aria-label="Animations"
-          onClick={() => set("animations", !settings.animations)}
-          className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${settings.animations ? "bg-accent" : "bg-slate-300"}`}
-        >
-          <span
-            className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow-card transition-transform ${settings.animations ? "translate-x-5" : ""}`}
+        <Switch label="Animations" checked={settings.animations} onChange={(v) => set("animations", v)} />
+      </Row>
+
+      <Row
+        title="Run size"
+        description={`How many directions each run cooks. About ${estimateCalls(run)} model requests with these settings. ${
+          ownKey ? "Full is the default on your own key." : "Quick is the default on Brainy's shared free requests."
+        }`}
+      >
+        <div className="flex flex-col items-start gap-3 sm:items-end">
+          <Segmented
+            name="run-size"
+            legend="Run size"
+            choices={RUN_SIZE_KEYS.map((k) => ({ value: k, label: RUN_SIZES[k].label, hint: RUN_SIZES[k].hint }))}
+            value={run.size}
+            onChange={(v) => updateSettings({ runSize: v, baseline: null })}
           />
-        </button>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <Switch size="sm" label="Include baseline" checked={run.baseline} onChange={(v) => set("baseline", v)} />
+            Include baseline
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <Switch size="sm" label="Live search" checked={run.search} onChange={(v) => set("liveSearch", v)} />
+            Live search
+          </label>
+        </div>
       </Row>
 
       <ApiKeys />
@@ -99,50 +124,5 @@ function Row({ title, description, children }: { title: string; description: str
       </div>
       {children}
     </section>
-  );
-}
-
-// A row of options built on real radio inputs, so arrow keys and screen readers work out of the box.
-function Segmented<T extends string>({
-  name,
-  legend,
-  choices,
-  value,
-  onChange,
-}: {
-  name: string;
-  legend: string;
-  choices: Choice<T>[];
-  value: T;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <fieldset className="shrink-0">
-      <legend className="sr-only">{legend}</legend>
-      <div className="inline-flex rounded-xl bg-slate-100 p-1">
-        {choices.map((c) => {
-          const checked = c.value === value;
-          return (
-            <label
-              key={c.value}
-              title={c.hint}
-              className={`cursor-pointer rounded-lg px-3.5 py-2 text-sm font-medium transition has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent ${
-                checked ? "bg-surface text-slate-950 shadow-card ring-1 ring-slate-900/5" : "text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              <input
-                type="radio"
-                name={name}
-                value={c.value}
-                checked={checked}
-                onChange={() => onChange(c.value)}
-                className="sr-only"
-              />
-              {c.label}
-            </label>
-          );
-        })}
-      </div>
-    </fieldset>
   );
 }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { IDEA_INPUT_ID } from "@/app/components/Nav";
 import { PurposePicker } from "@/app/components/PurposePicker";
+import { RunSetup } from "@/app/components/RunSetup";
 import { RunsBadge } from "@/app/components/RunsBadge";
 import { Kbd, Label } from "@/app/components/ui";
 import { formatDate } from "@/lib/format";
@@ -12,8 +13,9 @@ import { useHistory } from "@/lib/history";
 import { useKeys } from "@/lib/keys";
 import { MAX_IDEA_LENGTH, RUNS_PER_USER_PER_DAY } from "@/lib/limits";
 import { PURPOSES, type Purpose } from "@/lib/purposes";
-import { refreshRemaining, startRun, useFuelOut, useRemaining } from "@/lib/run";
-import { useSettings } from "@/lib/settings";
+import { WARN_AT_CALLS, estimateCalls } from "@/lib/run-plan";
+import { refreshRemaining, startRun, useFuelOut, useRemaining, useSharedLeft } from "@/lib/run";
+import { runOptions, useSettings } from "@/lib/settings";
 import { LENGTHS, TONES } from "@/lib/style";
 
 // Example ideas per purpose; a click drops one into the box.
@@ -41,6 +43,7 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
   const [purpose, setPurpose] = useState<Purpose>(initialPurpose);
   const remaining = useRemaining();
   const fuelOut = useFuelOut();
+  const sharedLeft = useSharedLeft();
   const ownKey = Boolean(useKeys().openrouter);
   const history = useHistory();
   const settings = useSettings();
@@ -53,14 +56,20 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
     if (matchMedia("(pointer: fine)").matches) inputRef.current?.focus();
   }, []);
 
+  const run = runOptions(settings, ownKey);
+  const calls = estimateCalls(run);
+
   // Out of free runs (or free fuel) only blocks visitors without their own key.
   const blocked = !ownKey && (remaining === 0 || fuelOut);
-  const canSend = idea.trim() !== "" && !blocked;
+  // The shared pool has some requests left, but not enough for this run size.
+  const tooBig = !ownKey && !blocked && typeof sharedLeft === "number" && sharedLeft < calls;
+  const canSend = idea.trim() !== "" && !blocked && !tooBig;
+  const warn = !ownKey && !blocked && !tooBig && calls >= WARN_AT_CALLS;
 
   function send() {
     if (!canSend) return;
     const { length, tone } = settings;
-    const id = startRun({ idea: idea.trim(), purpose, length, tone });
+    const id = startRun({ idea: idea.trim(), purpose, length, tone, ...run });
     router.push(`/result/${id}`);
   }
 
@@ -124,6 +133,28 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
           ))}
         </div>
 
+        <RunSetup run={run} ownKey={ownKey} />
+
+        {warn && (
+          <p role="note" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            This run uses ~{calls} of today&apos;s shared free requests. If they run out mid-run, you&apos;ll get partial
+            results.{" "}
+            <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
+              Add your own free OpenRouter key in Settings
+            </Link>{" "}
+            to avoid this.
+          </p>
+        )}
+        {tooBig && (
+          <p role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            Not enough free fuel left today for this run size. Try Quick, or{" "}
+            <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
+              add your own key
+            </Link>
+            .
+          </p>
+        )}
+
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
           <p id="idea-hint" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
             <span className="tabular-nums">
@@ -135,6 +166,9 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
           </p>
           <div className="flex items-center gap-3">
             <RunsBadge />
+            <span className="whitespace-nowrap text-xs tabular-nums text-slate-500" title="Estimated model requests for this run">
+              ~{calls} requests
+            </span>
             <button
               type="submit"
               disabled={!canSend}
@@ -165,7 +199,13 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
         </p>
       )}
 
-      <p className="mt-4 max-w-3xl text-xs text-slate-400">
+      {!ownKey && typeof sharedLeft === "number" && (
+        <p className="mt-4 max-w-3xl text-xs text-slate-500">
+          Shared free requests left today: <span className="font-semibold tabular-nums text-slate-700">{sharedLeft}</span>
+        </p>
+      )}
+
+      <p className="mt-2 max-w-3xl text-xs text-slate-400">
         Answers: {LENGTHS[settings.length].label.toLowerCase()}, {TONES[settings.tone].label.toLowerCase()} tone ·{" "}
         <Link href="/settings" className="underline underline-offset-2 hover:text-slate-600">
           change in Settings

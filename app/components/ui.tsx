@@ -273,3 +273,79 @@ export function Kbd({ children }: { children: ReactNode }) {
     </kbd>
   );
 }
+
+export type Choice<T extends string> = { value: T; label: string; hint?: string };
+
+// A row of options built on real radio inputs, so arrow keys and screen readers work out of the box.
+export function Segmented<T extends string>({
+  name,
+  legend,
+  choices,
+  value,
+  onChange,
+}: {
+  name: string;
+  legend: string;
+  choices: Choice<T>[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <fieldset className="shrink-0">
+      <legend className="sr-only">{legend}</legend>
+      <div className="inline-flex rounded-xl bg-slate-100 p-1">
+        {choices.map((c) => {
+          const checked = c.value === value;
+          return (
+            <label
+              key={c.value}
+              title={c.hint}
+              className={`cursor-pointer rounded-lg px-3.5 py-2 text-sm font-medium transition has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent ${
+                checked ? "bg-surface text-slate-950 shadow-card ring-1 ring-slate-900/5" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <input
+                type="radio"
+                name={name}
+                value={c.value}
+                checked={checked}
+                onChange={() => onChange(c.value)}
+                className="sr-only"
+              />
+              {c.label}
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+// On/off toggle. `size` "sm" fits inside a form row.
+export function Switch({
+  label,
+  checked,
+  onChange,
+  size = "md",
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  size?: "sm" | "md";
+}) {
+  const sm = size === "sm";
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={`relative shrink-0 rounded-full transition-colors ${sm ? "h-5 w-9" : "h-7 w-12"} ${checked ? "bg-accent" : "bg-slate-300"}`}
+    >
+      <span
+        className={`absolute rounded-full bg-white shadow-card transition-transform ${sm ? "left-0.5 top-0.5 h-4 w-4" : "left-1 top-1 h-5 w-5"} ${checked ? (sm ? "translate-x-4" : "translate-x-5") : ""}`}
+      />
+    </button>
+  );
+}

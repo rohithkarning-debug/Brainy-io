@@ -5,9 +5,9 @@ import { Kbd, SectionTitle } from "@/app/components/ui";
 // What a run does, in three cards under the hero.
 const FEATURES = [
   {
-    eyebrow: "9 directions · 3 models",
+    eyebrow: "Up to 9 directions · free models",
     title: "Not the obvious version",
-    body: "Your idea gets pushed in nine deliberately different directions, spread across three models, next to a plain baseline for comparison.",
+    body: "Your idea gets pushed in up to nine deliberately different directions, spread across the free models you pick, with an optional plain baseline for comparison.",
   },
   {
     eyebrow: "Web · GitHub · arXiv",

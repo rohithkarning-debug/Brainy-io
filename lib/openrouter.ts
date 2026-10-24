@@ -69,24 +69,29 @@ export type CallOptions = {
   maxTokens?: number;
   signal?: AbortSignal; // aborted when the visitor presses Stop or leaves
   apiKey?: string; // the visitor's own OpenRouter key; defaults to the server's
+  meter?: Meter; // counts calls and records model health (see lib/server/quota.ts)
+  deadline?: number; // ms since epoch: no call may run past this
+};
+
+/**
+ * Watches every request a run makes. `take` runs before each one and throws
+ * (an OutOfCallsError) to refuse it, e.g. when the shared free pool is empty;
+ * `failed` hears about every failed request, to mark models busy.
+ */
+export type Meter = {
+  take(model: string): Promise<void>;
+  failed(model: string, err: unknown): void;
 };
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 // Free OpenRouter models (checked October 2026; see https://openrouter.ai/models?q=free).
-// Used as the fallback chain when a model is out of credits, rate-limited or down.
-// Free models have their own daily request limits, so this is a safety net, not a plan.
+// Only used when the live model list (lib/server/catalog.ts) can't be fetched.
 export const FREE_MODELS = [
-  "nvidia/nemotron-3-ultra-550b-a55b:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
   "google/gemma-4-31b-it:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
 ];
-
-// Statuses worth trying another model for: out of credits, rate-limited,
-// down, or (404) no longer offered by its provider.
-function shouldFallBack(status: number) {
-  return status === 402 || status === 404 || status === 429 || status >= 500;
-}
 
 // A non-2xx reply from OpenRouter, keeping the status so we can decide whether to fall back.
 class HttpError extends Error {
@@ -97,14 +102,43 @@ class HttpError extends Error {
   }
 }
 
-/** True if a call failed because the model was out of credits or rate-limited (402/429). */
+/** The shared free pool ran dry mid-run, so this call was never sent. */
+export class OutOfCallsError extends Error {
+  constructor() {
+    super("The shared free pool is used up for today");
+  }
+}
+
+/** OpenRouter's daily cap on free-model requests for this key ("free-models-per-day"). */
+export function isDailyLimitError(err: unknown): boolean {
+  return err instanceof HttpError && err.status === 429 && /free-models-per-day/i.test(err.message);
+}
+
+/** A limit on the whole key rather than on one model: trying another model won't help. */
+export function isKeyLimitError(err: unknown): boolean {
+  return err instanceof HttpError && err.status === 429 && /free-models-per-(day|min)/i.test(err.message);
+}
+
+// Statuses worth trying another model for: out of credits, rate-limited,
+// down, or (404) no longer offered by its provider.
+function shouldFallBack(err: HttpError) {
+  const { status } = err;
+  return !isKeyLimitError(err) && (status === 402 || status === 404 || status === 429 || status >= 500);
+}
+
+/** True if a call failed because the model, the key or the free pool ran out (402/429). */
 export function isQuotaError(err: unknown): boolean {
-  return err instanceof HttpError && (err.status === 402 || err.status === 429);
+  return err instanceof OutOfCallsError || (err instanceof HttpError && (err.status === 402 || err.status === 429));
 }
 
 /** True if OpenRouter refused the API key itself (401). */
 export function isAuthError(err: unknown): boolean {
   return err instanceof HttpError && err.status === 401;
+}
+
+/** The HTTP status of a failed call, if it got that far. */
+export function httpStatus(err: unknown): number | null {
+  return err instanceof HttpError ? err.status : null;
 }
 
 type CallSettings = {
@@ -113,7 +147,12 @@ type CallSettings = {
   maxTokens?: number;
   signal?: AbortSignal;
   apiKey?: string; // used for this call only; never stored or logged
+  meter?: Meter;
+  deadline?: number;
 };
+
+// Less time than this before the deadline isn't worth starting a call for.
+const MIN_CALL_MS = 8_000;
 
 /**
  * Send one system + user message to a model and return its raw text reply.
@@ -123,47 +162,65 @@ async function callModel(
   model: string,
   system: string,
   user: string,
-  { temperature = 0.9, timeoutMs = 30_000, maxTokens = 800, signal, apiKey = process.env.OPENROUTER_API_KEY }: CallSettings = {}
+  {
+    temperature = 0.9,
+    timeoutMs = 30_000,
+    maxTokens = 800,
+    signal,
+    apiKey = process.env.OPENROUTER_API_KEY,
+    meter,
+    deadline,
+  }: CallSettings = {}
 ): Promise<string> {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set");
+  // Never run past the run's time budget; a call that can't finish isn't sent (or counted).
+  const timeout = deadline ? Math.min(timeoutMs, deadline - Date.now()) : timeoutMs;
+  if (timeout < MIN_CALL_MS) throw new DOMException(`No time left for ${model}`, "TimeoutError");
+  await meter?.take(model);
 
-  const res = await fetch(OPENROUTER_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "X-Title": "Brainy", // optional: shows the app name in your OpenRouter dashboard
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      temperature,
-      // Cap the reply length. Without this OpenRouter reserves the model's full
-      // output limit up front, which can fail on low-credit keys.
-      max_tokens: maxTokens,
-      // The free fallbacks are reasoning models. Keep their thinking short so it
-      // doesn't eat the max_tokens budget, and leave it out of the reply.
-      ...(model.endsWith(":free") && { reasoning: { effort: "low", exclude: true } }),
-    }),
-    // Give up on a slow model instead of hanging forever, and stop paying
-    // for the call as soon as the visitor cancels.
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
-  });
+  try {
+    const res = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "X-Title": "Brainy", // optional: shows the app name in your OpenRouter dashboard
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        temperature,
+        // Cap the reply length. Without this OpenRouter reserves the model's full
+        // output limit up front, which can fail on low-credit keys.
+        max_tokens: maxTokens,
+        // Free models are mostly reasoning models. Keep their thinking short so it
+        // doesn't eat the max_tokens budget, and leave it out of the reply.
+        ...(model.endsWith(":free") && { reasoning: { effort: "low", exclude: true } }),
+      }),
+      // Give up on a slow model instead of hanging forever, and stop paying
+      // for the call as soon as the visitor cancels.
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
+    });
 
-  if (!res.ok) {
-    throw new HttpError(res.status, `${model} returned HTTP ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      throw new HttpError(res.status, `${model} returned HTTP ${res.status}: ${await res.text()}`);
+    }
+
+    const data = await res.json();
+    return data?.choices?.[0]?.message?.content ?? "";
+  } catch (err) {
+    if (!signal?.aborted) meter?.failed(model, err);
+    throw err;
   }
-
-  const data = await res.json();
-  return data?.choices?.[0]?.message?.content ?? "";
 }
 
 /**
- * Try each model in turn until one answers. Only moves on for 402/429/5xx;
- * any other error (bad request, timeout, cancelled) is thrown straight away.
+ * Try each model in turn until one answers. Only moves on for 402/404/429/5xx
+ * from that model; anything else (a key-wide limit, bad request, timeout,
+ * cancelled, the free pool running dry) is thrown straight away.
  * Returns the reply and the model that produced it.
  */
 async function callWithFallback(
@@ -177,7 +234,7 @@ async function callWithFallback(
     try {
       return { text: await callModel(model, system, user, settings), model };
     } catch (err) {
-      if (!(err instanceof HttpError) || !shouldFallBack(err.status) || settings.signal?.aborted) throw err;
+      if (!(err instanceof HttpError) || !shouldFallBack(err) || settings.signal?.aborted) throw err;
       console.warn(`Falling back from ${model}:`, err.message);
       lastError = err;
     }
@@ -253,7 +310,7 @@ export async function generateVersion(
   systemPrompt: string,
   idea: string,
   purpose: Purpose,
-  { style, maxTokens, signal, apiKey }: CallOptions = {}
+  { style, maxTokens, signal, apiKey, meter, deadline }: CallOptions = {}
 ): Promise<IdeaJSON & { model: string }> {
   const { guidance, fields } = PURPOSES[purpose];
 
@@ -267,7 +324,7 @@ export async function generateVersion(
   const styleLine = style ? `\n\n${style}` : "";
   const system = `${systemPrompt}\n\n${guidance}${styleLine}\n\nRespond with ONLY a JSON object, no markdown, no extra text, in exactly this shape:\n${shape}`;
 
-  const { text, model } = await callWithFallback(models, system, idea, { maxTokens, signal, apiKey });
+  const { text, model } = await callWithFallback(models, system, idea, { maxTokens, signal, apiKey, meter, deadline });
   const obj = extractJSON(text);
 
   // Make sure every field exists and is a non-empty string.
@@ -302,7 +359,7 @@ export async function writeSearchQueries(
   models: string[],
   idea: string,
   purpose: Purpose,
-  { signal, apiKey }: CallOptions = {}
+  { signal, apiKey, meter, deadline }: CallOptions = {}
 ): Promise<SearchQueries> {
   const { label, searchHint } = PURPOSES[purpose];
   const user = `Purpose: ${label}. Look for: ${searchHint}.\n\nIdea:\n${idea}`;
@@ -312,6 +369,8 @@ export async function writeSearchQueries(
     maxTokens: 300,
     signal,
     apiKey,
+    meter,
+    deadline,
   });
   const obj = extractJSON(text);
 
@@ -376,7 +435,7 @@ export async function judgeIdea(
   purpose: Purpose,
   versions: Version[],
   results: SearchResult[] | null,
-  { style, signal, apiKey }: CallOptions = {},
+  { style, signal, apiKey, meter, deadline }: CallOptions = {},
   special: { devpost?: SearchResult[]; arxiv?: SearchResult[] } = {}
 ): Promise<BrainyTake> {
   const { label, fields } = PURPOSES[purpose];
@@ -425,7 +484,7 @@ export async function judgeIdea(
   // Free reasoning judges often need 40-80s for the full verdict (longer with
   // the Devpost / arXiv sections), so allow that before trying the next model.
   const extra = Boolean(devpost || arxiv);
-  const settings = { temperature: 0.4, timeoutMs: extra ? 100_000 : 90_000, maxTokens: extra ? 2800 : 2000, signal, apiKey };
+  const settings = { temperature: 0.4, timeoutMs: extra ? 100_000 : 90_000, maxTokens: extra ? 2800 : 2000, signal, apiKey, meter, deadline };
   return callAndParse(models, system, user, settings, (text, model): BrainyTake => {
     const obj = extractJSON(text);
 
@@ -565,7 +624,7 @@ export async function crossIdeas(
   idea: string,
   purpose: Purpose,
   parents: [ParentIdea, ParentIdea],
-  { style, maxTokens = 800, signal, apiKey }: CallOptions = {}
+  { style, maxTokens = 800, signal, apiKey, meter, deadline }: CallOptions = {}
 ): Promise<{ offspring: OffspringJSON[]; model: string }> {
   const { guidance, fields } = PURPOSES[purpose];
   const shape = JSON.stringify({
@@ -585,7 +644,7 @@ export async function crossIdeas(
   const user = `Purpose: ${PURPOSES[purpose].label}\n\nOriginal idea:\n${idea}\n\n${describe(parents[0], "A")}\n\n${describe(parents[1], "B")}`;
 
   // Three ideas in one reply, so roughly three times one version's budget.
-  const settings = { temperature: 0.9, timeoutMs: 45_000, maxTokens: Math.min(maxTokens * 3, 3600), signal, apiKey };
+  const settings = { temperature: 0.9, timeoutMs: 45_000, maxTokens: Math.min(maxTokens * 3, 3600), signal, apiKey, meter, deadline };
   return callAndParse(models, system, user, settings, (text, model) => {
     const obj = extractJSON(text);
     const list: unknown[] = Array.isArray(obj.offspring) ? obj.offspring : [];
@@ -625,7 +684,7 @@ export async function judgeOffspring(
   idea: string,
   purpose: Purpose,
   offspring: (ParentIdea & { id: string; inherits: string })[],
-  { style, signal, apiKey }: CallOptions = {}
+  { style, signal, apiKey, meter, deadline }: CallOptions = {}
 ): Promise<{ pickId: string; why: string; notes: { id: string; note: string }[]; model: string }> {
   const { label, fields } = PURPOSES[purpose];
   const list = offspring
@@ -639,7 +698,7 @@ export async function judgeOffspring(
   const system = [GENERATION_JUDGE_PROMPT, style].filter(Boolean).join(" ");
 
   const ids = new Set(offspring.map((o) => o.id));
-  const settings = { temperature: 0.4, timeoutMs: 60_000, maxTokens: 1500, signal, apiKey };
+  const settings = { temperature: 0.4, timeoutMs: 60_000, maxTokens: 1500, signal, apiKey, meter, deadline };
   return callAndParse(models, system, user, settings, (text, model) => {
     const obj = extractJSON(text);
     const pickId = String(obj.pickId ?? "");

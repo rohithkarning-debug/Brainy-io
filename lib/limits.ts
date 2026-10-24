@@ -15,6 +15,12 @@ export const RUNS_PER_IP_PER_DAY = 15;
 // an anti-abuse cap. These don't touch the free runs above.
 export const BYOK_RUNS_PER_USER_PER_DAY = 50;
 
-// Runs across ALL visitors per day on the server's key, unless the
-// GLOBAL_DAILY_RUNS env var says otherwise (read in lib/ratelimit.ts).
-export const DEFAULT_GLOBAL_DAILY_RUNS = 60;
+// Model calls across ALL visitors per day on the server's key, unless the
+// GLOBAL_DAILY_CALLS env var says otherwise (read in lib/server/quota.ts).
+// Every call counts, fallbacks and retries included; calls on a visitor's
+// own key never do.
+export const DEFAULT_GLOBAL_DAILY_CALLS = 45;
+
+// "Try another judge" re-runs per user per day. They don't use up a run, but
+// they do spend model calls, so they get their own small cap.
+export const REJUDGES_PER_USER_PER_DAY = 10;

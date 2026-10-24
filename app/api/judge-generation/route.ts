@@ -1,18 +1,19 @@
 // POST /api/judge-generation
-// Body: { idea, purpose, length?, tone?, offspring: (ParentIdea & { id, inherits })[] } (2 to 9).
+// Body: { idea, purpose, length?, tone?, judge?: "auto" | model id,
+//         offspring: (ParentIdea & { id, inherits })[] } (2 to 9).
 // Optional own-key headers as for /api/expand.
 // Returns: { pickId, why, notes: { id, note }[], model, remaining? }
 // Errors: { error, limitReached?, fuelOut?, keyProblem? } with a 4xx/5xx status.
 //
 // The judge's verdict on one generation of bred ideas. Counts as one run
-// (or one own-key run). Signed out: 401.
+// (or one own-key run) and one call from the shared free pool. Signed out: 401.
 
 import { NextResponse } from "next/server";
 import { MAX_JUDGED } from "@/lib/lineage";
 import { judgeOffspring } from "@/lib/openrouter";
-import { readBase, readIdea } from "@/lib/server/breed-input";
-import { failureResponse, identify, takeRun } from "@/lib/server/guard";
-import { JUDGE_MODEL, withFallbacks } from "@/lib/server/models";
+import { readBase, readIdea, readModelChoice } from "@/lib/server/breed-input";
+import { admit, failureResponse, identify } from "@/lib/server/guard";
+import { lineup } from "@/lib/server/models";
 import { styleInstruction } from "@/lib/style";
 
 // One 60s call, plus one retry on the next model if it times out or its reply is unusable.
@@ -39,18 +40,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Judging needs at least two bred ideas." }, { status: 400 });
   }
 
-  const usage = await takeRun(caller);
-  if (usage instanceof NextResponse) return usage;
+  const admission = await admit(caller, { calls: 1 });
+  if (admission instanceof NextResponse) return admission;
+  const { usage, meter } = admission;
 
   try {
-    const verdict = await judgeOffspring(withFallbacks(JUDGE_MODEL), base.idea, base.purpose, offspring, {
+    const { judges } = await lineup({ ownKey: caller.ownKey, judge: readModelChoice(body).judge });
+    const verdict = await judgeOffspring(judges, base.idea, base.purpose, offspring, {
       style: styleInstruction(base.length, base.tone),
       signal: req.signal,
       apiKey: caller.keys.openrouter,
+      meter,
     });
     return NextResponse.json({ ...verdict, ...(!caller.ownKey && { remaining: usage.remaining }) });
   } catch (err) {
     console.warn("Generation judge failed:", err instanceof Error ? err.message : err);
     return failureResponse([err], caller.ownKey);
+  } finally {
+    await meter.finish();
   }
 }
