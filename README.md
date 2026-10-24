@@ -9,42 +9,82 @@
 
 ---
 
-## What it does
+## Why I built this
 
-- **Divergent directions.** Your idea is pushed 3, 6 or 9 deliberately different ways (a different customer, the opposite market, a hardware hack, a benchmark…), spread across several free models, next to an optional plain baseline for comparison.
-- **Live search.** While the models write, Brainy searches the web, GitHub, Devpost and arXiv for things that already do this.
-- **A judge's verdict.** A judge model reads every version and every search result, rates how crowded the space is (Fresh / Crowded / Very saturated), and picks the most unique direction that could still work. Every "similar thing" it cites is a real search result.
-- **Idea breeding and a lineage tree.** Pick any two ideas and cross them into three offspring that each inherit a trait from both parents. Keep breeding across generations, ask the judge to rank a generation, and explore the family tree (pan, zoom, ancestor highlighting).
-- **Hackathon: "Built before".** Similar past Devpost projects, each rated for how close it is, plus "the twist none of them tried".
-- **Research: "Papers that almost did this".** The closest arXiv papers, what each did and didn't do, and the gap your idea fills. The judge flags it when it isn't sure.
+**What problem does it solve?**
+Every hackathon, research paper or startup idea starts the same way: you have a rough idea, and you need to find the version of it that's actually worth building. I struggled with this myself, and I kept seeing friends and classmates stuck at the same point. The first version you think of, or the one an AI hands you, is usually the obvious one, and it often already exists. Brainy takes your idea, pushes it in several deliberately different directions, checks each one against what's already out there, and tells you honestly which one is worth chasing.
 
-The site stays black and white until a real result is cooked, then blooms into colour.
+**Who uses it?**
+I built it for myself first, then asked friends to try it and tell me what worked and what didn't. Their feedback shaped a lot of what Brainy is today. It's now live for anyone to use, especially students trying to find the strongest version of their idea.
+
+**What happened when something went wrong?**
+- **History didn't follow you between devices.** A friend signed in with the same Google account on his phone and laptop, and his history only showed up on one of them, because it was saved in the browser. I added optional cloud sync, so you can choose to keep your history with your account across every device, while it stays private and local by default.
+- **Big runs burned through the shared AI quota.** Every direction is a separate AI call, so larger runs used up the free limit fast. I added run sizes so you can choose how big a run should be, and a bring-your-own-key option: you can plug in your own free API key, which stays in your browser and is never stored on our servers.
+
+---
+
+## Features
+
+### 1. Divergent directions
+Type a rough idea and choose what it's for: **Startup**, **Hackathon** or **Research**. The purpose changes what a "finished" version looks like. Brainy then pushes the idea in several deliberately different directions, such as a different customer, the opposite market, an inverted assumption, or a hardware or technical twist, so you see possibilities you wouldn't have thought of.
+
+- **Run sizes:** Quick (3 directions), Standard (6) or Full (9). Even Quick is curated to cover a wide spread instead of just the first few angles.
+- **Multiple models:** directions are spread across different AI models, because different models think differently. You can let Brainy choose (Auto) or pick 1–4 models yourself.
+- **The baseline:** an optional "obvious answer", what a typical AI would say, shown next to the directions so you can see how far each one moves away from it. It's on by default for Full runs.
+
+### 2. Checked against reality
+While the directions are being generated, Brainy searches for what already exists so you aren't reinventing something. It writes focused search queries, then looks across the web, GitHub, Devpost and arXiv depending on the purpose. Every link and title it shows comes from real search results. If the search can't run, the verdict says so and only names things the model already knows, with no links.
+
+### 3. An honest verdict
+A judge model reads every direction alongside the search results and tells you how crowded the space is, which direction is the most original idea that could still work, and what to explore next, with follow-up ideas that open the Ask page pre-filled. If the judge fails, you can pick a different judge model and re-run only the verdict, without using up a run (up to 10 times a day).
+
+### 4. Idea breeding 🧬
+The most experimental feature: treat ideas like a genetic algorithm.
+- **Cross two ideas:** select any two directions and press **Cross**. Brainy creates three "offspring" that genuinely combine both parents instead of just stapling them together. Each one says what it inherits, for example *"inherits the B2B model from A and the offline-first approach from B."*
+- **Keep evolving:** cross offspring with each other, or with the original directions, to build generation 2, generation 3 and beyond. You choose which ideas are worth breeding further.
+- **Lineage tree:** the **Lineage** tab draws the whole family tree, from your original idea through each direction to every generation of offspring. Pan, pinch or Ctrl/⌘ + scroll to zoom, and hover over (or focus) any idea to highlight its whole line of ancestors. On phones it switches to a vertical layout.
+- **Judge a generation:** send a generation of offspring (all of it, or up to 9 you pick) to the judge for a fresh verdict, and save the ones you like. The whole tree is saved with the result, so it's still there when you come back.
+
+### 5. "Built before" (Hackathon mode)
+Hackathon ideas get repeated a lot. Brainy finds similar past hackathon projects, shows how close each one is, and points out **the twist none of them tried**. If nothing similar turns up, it says so, which is a good sign.
+
+### 6. "Papers that almost did this" (Research mode)
+For research ideas, Brainy finds the closest papers on arXiv, shows what each one did and didn't do, and names **the gap** your direction could fill. It only cites papers it actually found, and says so when it isn't sure.
+
+### 7. Live, streaming results
+Results don't arrive all at once at the end. While Brainy works, rotating "Cooking…" messages show progress, and each card appears the moment it's ready. You can stop a run at any time, which also cancels the AI calls still running so nothing is wasted. You can also regenerate, or retry if something fails.
+
+### 8. Monochrome until it's cooked
+The whole site is black and white, and stays that way until your idea is ready. When the run finishes, the page blooms into colour: a slowly flowing gradient, coloured cards, and the winning direction highlighted. Example content stays monochrome, so colour always means *your* result. It respects reduced-motion settings.
+
+### 9. Your history, your control
+- **History and Saved:** search, filter, save and delete past results.
+- **Private by default:** results stay in your browser. Turn on **cloud sync** if you want your history on every device you sign in on, and turn it off anytime, choosing whether to keep or delete the cloud copy.
+- **Public links:** make any synced result public to share a read-only page anyone can open, and make it private again with one click.
+- **Delete my data:** wipes your cloud copy and this browser's history, settings and keys in one step.
+
+### 10. Free to use, or bring your own key
+Every account gets 5 free runs a day, drawn from a shared daily pool of free AI requests. Brainy shows how many requests a run will use and warns you before big runs. Add your own OpenRouter key in Settings (a free account works) to get your own quota and any model on OpenRouter, including paid ones billed to your key. Your key stays in your browser and is never stored on our servers.
+
+### 11. Make it yours
+Light or dark theme, answer length, tone, font size, and an animations toggle. Keyboard shortcuts: **Ctrl/⌘ + K** jumps to the idea box from anywhere, **Enter** cooks (**Shift + Enter** for a new line), and the **← →** arrow keys move between result tabs once the tab bar is focused.
 
 ---
 
 ## Architecture
 
-### One run
-
 ```mermaid
-flowchart LR
-    B["Browser<br/>(lib/run.ts)"] -->|"POST idea + run setup<br/>(+ own key in header)"| E["/api/expand"]
-    E --> G{"Signed in?<br/>Auth.js"}
-    G -->|no| X401["401"]
-    G -->|yes| Q{"Upstash<br/>runs left + reserve<br/>shared calls"}
-    Q -->|"not enough"| X429["429: try Quick<br/>or add a key"]
-    Q -->|reserved| P["Run in parallel"]
-    P --> S["Search: query writer, then<br/>Tavily · GitHub · Devpost · arXiv"]
-    P --> M["Directions + baseline<br/>(free models, round-robin,<br/>health-aware fallbacks)"]
-    S --> J["Judge<br/>(gets the rest of the time budget)"]
-    M --> J
-    S -.->|search event| N
-    M -.->|version events| N
-    J -->|"take event"| N["NDJSON stream<br/>one finished JSON object per line"]
-    N --> B
+flowchart TD
+    A["You type an idea"] --> B["Vercel serverless API"]
+    B --> C["Sign-in and usage limits"]
+    C --> D["Live search<br/>Web, GitHub, Devpost, arXiv"]
+    C --> E["Idea generation<br/>Multiple free AI models"]
+    D --> F["Judge picks the best direction"]
+    E --> F
+    F --> G["Results stream back live"]
 ```
 
-The stream sends `start → search / baseline / version (in any order) → take → done`, each event the moment its piece is finished. When the run ends, unused reserved calls go back to the shared pool.
+**One run, in detail.** The browser posts the idea and run setup to `/api/expand`. A signed-out request gets a 401. Next, Upstash checks the user's runs left and atomically reserves the run's estimated model calls from the shared pool, or refuses with a 429. Search (a query-writing call, then Tavily, GitHub, Devpost and arXiv) and generation (directions spread round-robin across free models, with health-aware fallbacks) run in parallel. The judge gets whatever is left of the time budget. The response is an NDJSON stream: `start → search / baseline / version (in any order) → take → done`, each event sent the moment its piece is finished. When the run ends, unused reserved calls go back to the pool.
 
 ### Where data lives
 
