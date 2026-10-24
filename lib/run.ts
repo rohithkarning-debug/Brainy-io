@@ -5,6 +5,7 @@
 
 import { useSyncExternalStore } from "react";
 import { getResult, saveResult, updateResult, type Result } from "@/lib/history";
+import { fuelOutMessage } from "@/lib/format";
 import { keyHeaders } from "@/lib/keys";
 import type { BrainyTake } from "@/lib/openrouter";
 import type { Purpose } from "@/lib/purposes";
@@ -161,7 +162,8 @@ async function execute(id: string, input: RunInput) {
       }
       update(id, () => ({
         status: "error",
-        error: data.error ?? `Brainy couldn't answer (HTTP ${res.status}). Please try again.`,
+        // Fuel out: the same message, with the reset time in this viewer's timezone.
+        error: data.fuelOut ? fuelOutMessage() : (data.error ?? `Brainy couldn't answer (HTTP ${res.status}). Please try again.`),
         limited: Boolean(data.limitReached) && !data.fuelOut,
         outOfJuice: Boolean(data.fuelOut),
         keyProblem: Boolean(data.keyProblem),
@@ -195,7 +197,7 @@ async function execute(id: string, input: RunInput) {
           }
           update(id, () => ({
             status: "error",
-            error: event.error,
+            error: event.outOfJuice ? fuelOutMessage() : event.error,
             outOfJuice: event.outOfJuice,
             keyProblem: event.keyProblem,
           }));
@@ -274,7 +276,10 @@ export async function rejudge(id: string, judge: string): Promise<{ error: strin
       setRemaining(remaining ?? null, data.fuelOut ? true : undefined, data.sharedLeft);
     }
     if (!res.ok || !data.take) {
-      return { error: data.error ?? `Brainy couldn't answer (HTTP ${res.status}). Please try again.`, outOfJuice: Boolean(data.fuelOut) };
+      return {
+        error: data.fuelOut ? fuelOutMessage() : (data.error ?? `Brainy couldn't answer (HTTP ${res.status}). Please try again.`),
+        outOfJuice: Boolean(data.fuelOut),
+      };
     }
     const take = data.take as BrainyTake;
     // The live copy (if this tab ran it) and the stored one both get the verdict.

@@ -3,6 +3,7 @@
 // History and Saved reopen the whole tree. Browser-only.
 
 import { getResult, updateResult, type Result } from "@/lib/history";
+import { fuelOutMessage } from "@/lib/format";
 import { keyHeaders } from "@/lib/keys";
 import {
   EMPTY_LINEAGE,
@@ -42,7 +43,7 @@ async function post<T>(url: string, body: unknown): Promise<T | BreedError> {
         noteUsage(data.remaining, data.fuelOut ? true : undefined, data.sharedLeft);
       }
       return {
-        error: data.error ?? `Brainy couldn't answer (HTTP ${res.status}). Please try again.`,
+        error: data.fuelOut ? fuelOutMessage() : (data.error ?? `Brainy couldn't answer (HTTP ${res.status}). Please try again.`),
         outOfJuice: Boolean(data.fuelOut),
         keyProblem: Boolean(data.keyProblem),
         limited: Boolean(data.limitReached) && !data.fuelOut,

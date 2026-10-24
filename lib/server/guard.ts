@@ -14,8 +14,10 @@ import { createMeter, release, reserve, type Reservation, type RunMeter } from "
 // Shown for any server-side problem. Details go to the logs, never to visitors.
 export const GENERIC_ERROR = "Something went wrong on our side. Please try again.";
 
-// The shared free pool is used up for today, or OpenRouter's daily free cap hit.
-export const FUEL_OUT = "Brainy's free fuel is out for today. Add your own free OpenRouter key to keep going.";
+// The shared free pool is used up for today (or can't cover even a Quick run),
+// or OpenRouter's daily free cap hit. The page shows the reset time in the
+// viewer's own timezone (lib/format.ts fuelOutMessage); this is the fallback.
+export const FUEL_OUT = "Free fuel is out for today. It resets at midnight UTC. Add your own free key to keep going.";
 
 // The pool has some calls left, but fewer than this run would need.
 const NOT_ENOUGH = "Not enough free fuel left today for this run size. Try Quick, or add your own key.";
@@ -100,7 +102,7 @@ const limitHit = (body: Record<string, unknown>) => NextResponse.json({ limitRea
  */
 export async function admit(
   { visitor, ownKey }: Caller,
-  { calls, kind = "run" }: { calls: number; kind?: "run" | "rejudge" }
+  { calls, quickCalls, kind = "run" }: { calls: number; quickCalls?: number; kind?: "run" | "rejudge" }
 ): Promise<Admission | NextResponse> {
   const spend = () => (kind === "rejudge" ? consumeRejudge(visitor) : consumeRun(visitor, { ownKey }));
   try {
@@ -118,8 +120,10 @@ export async function admit(
 
     const reservation: Reservation = await reserve(calls);
     if (!reservation.ok) {
-      return reservation.out
-        ? limitHit({ error: FUEL_OUT, fuelOut: true, sharedLeft: 0 })
+      // Only suggest Quick when a Quick run (same toggles) would actually fit.
+      const quickFits = quickCalls !== undefined && reservation.left >= quickCalls;
+      return reservation.out || !quickFits
+        ? limitHit({ error: FUEL_OUT, fuelOut: true, sharedLeft: reservation.left })
         : limitHit({ error: NOT_ENOUGH, notEnough: true, sharedLeft: reservation.left });
     }
 

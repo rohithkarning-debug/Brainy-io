@@ -8,7 +8,7 @@ import { PurposePicker } from "@/app/components/PurposePicker";
 import { RunSetup } from "@/app/components/RunSetup";
 import { RunsBadge } from "@/app/components/RunsBadge";
 import { Kbd, Label } from "@/app/components/ui";
-import { formatDate } from "@/lib/format";
+import { formatDate, fuelResetText } from "@/lib/format";
 import { useHistory } from "@/lib/history";
 import { useKeys } from "@/lib/keys";
 import { MAX_IDEA_LENGTH, RUNS_PER_USER_PER_DAY } from "@/lib/limits";
@@ -63,6 +63,8 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
   const blocked = !ownKey && (remaining === 0 || fuelOut);
   // The shared pool has some requests left, but not enough for this run size.
   const tooBig = !ownKey && !blocked && typeof sharedLeft === "number" && sharedLeft < calls;
+  // Not even a Quick run (with the same baseline/search toggles) fits: suggesting Quick would be wrong.
+  const quickFits = typeof sharedLeft === "number" && sharedLeft >= estimateCalls({ ...run, size: "quick" });
   const canSend = idea.trim() !== "" && !blocked && !tooBig;
   const warn = !ownKey && !blocked && !tooBig && calls >= WARN_AT_CALLS;
 
@@ -147,11 +149,17 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
         )}
         {tooBig && (
           <p role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            Not enough free fuel left today for this run size. Try Quick, or{" "}
-            <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
-              add your own key
-            </Link>
-            .
+            {quickFits ? (
+              <>
+                Not enough free fuel left today for this run size. Try Quick, or{" "}
+                <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
+                  add your own key
+                </Link>
+                .
+              </>
+            ) : (
+              <FuelOutText />
+            )}
           </p>
         )}
 
@@ -185,12 +193,16 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
 
       {blocked && (
         <p className="mt-6 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-800">
-          {fuelOut
-            ? "Brainy's free fuel is out for today."
-            : `You've used your ${RUNS_PER_USER_PER_DAY} free runs today.`}{" "}
-          <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
-            Add your own free OpenRouter key to keep going <span aria-hidden>→</span>
-          </Link>{" "}
+          {fuelOut ? (
+            <FuelOutText />
+          ) : (
+            <>
+              You&apos;ve used your {RUNS_PER_USER_PER_DAY} free runs today.{" "}
+              <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
+                Add your own free OpenRouter key to keep going <span aria-hidden>→</span>
+              </Link>
+            </>
+          )}{" "}
           Your{" "}
           <Link href="/history" className="font-medium underline underline-offset-2">
             history
@@ -239,5 +251,19 @@ export function AskScreen({ initialIdea, initialPurpose }: { initialIdea: string
         </section>
       )}
     </div>
+  );
+}
+
+// "Free fuel is out for today. It resets at 5:30 AM IST (midnight UTC). Add your own free key to keep going."
+// with the last sentence linking to Settings. The reset time is in the viewer's own timezone.
+function FuelOutText() {
+  return (
+    <>
+      Free fuel is out for today. {fuelResetText()}{" "}
+      <Link href="/settings#api-keys" className="font-semibold underline underline-offset-2">
+        Add your own free key to keep going
+      </Link>
+      .
+    </>
   );
 }

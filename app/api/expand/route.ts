@@ -100,7 +100,10 @@ export async function POST(req: Request) {
   // Reserve this run's model calls from the shared pool and use up one of
   // today's runs (or one on their own key). Done after the checks above, so
   // invalid requests don't count.
-  const admission = await admit(caller, { calls: estimateCalls({ size, baseline, search }) });
+  const admission = await admit(caller, {
+    calls: estimateCalls({ size, baseline, search }),
+    quickCalls: estimateCalls({ size: "quick", baseline, search }),
+  });
   if (admission instanceof NextResponse) return admission;
   const { usage, meter } = admission;
 

@@ -69,3 +69,27 @@ export function resultToText(result: Result) {
   }
   return parts.join("\n\n");
 }
+
+// ---------- The shared free pool's daily reset ----------
+
+/** The next midnight UTC, when the shared free pool refills. */
+export function nextUtcMidnight(now = new Date()) {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+}
+
+/**
+ * "It resets at 5:30 AM IST (midnight UTC)." in the viewer's own timezone
+ * (browser only: the server doesn't know it). Viewers on UTC just get
+ * "It resets at midnight UTC."
+ */
+export function fuelResetText(now = new Date()) {
+  const reset = nextUtcMidnight(now);
+  if (reset.getTimezoneOffset() === 0) return "It resets at midnight UTC.";
+  const local = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(reset);
+  return `It resets at ${local} (midnight UTC).`;
+}
+
+/** The pool can't cover even a Quick run (or is empty). */
+export function fuelOutMessage(now = new Date()) {
+  return `Free fuel is out for today. ${fuelResetText(now)} Add your own free key to keep going.`;
+}

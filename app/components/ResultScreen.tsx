@@ -13,7 +13,7 @@ import { useToast } from "@/app/components/Toast";
 import { ActionButton, SectionTitle, TabPanel, Tabs } from "@/app/components/ui";
 import { VersionCard } from "@/app/components/VersionCard";
 import { crossNodes, isBreedError, type BreedError } from "@/lib/breed";
-import { formatDate, resultToText, sourceList } from "@/lib/format";
+import { formatDate, fuelResetText, resultToText, sourceList } from "@/lib/format";
 import { togglePin, useHistory, type Result } from "@/lib/history";
 import { useKeys } from "@/lib/keys";
 import { directionNodeId, findIdea, readLineage, type Lineage, type NodeId } from "@/lib/lineage";
@@ -578,7 +578,7 @@ function OutOfJuice() {
         Brainy&apos;s free fuel is out for today
       </h2>
       <p className="mt-2 leading-relaxed text-slate-600">
-        Everyone&apos;s free runs share one daily tank of model requests, and it&apos;s empty until midnight UTC. Add your own free OpenRouter key to keep
+        Everyone&apos;s free runs share one daily tank of model requests, and it&apos;s empty for today. {fuelResetText()} Add your own free OpenRouter key to keep
         going. It stays in this browser and your runs on it don&apos;t touch the free limit.
       </p>
       <div className="mt-6 flex flex-wrap gap-3">
