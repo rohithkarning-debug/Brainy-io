@@ -1,173 +1,134 @@
 # Brainy
 
-Turn a half-baked idea into genuinely different finished versions, check them
-against what already exists, and get an honest verdict on which one to chase.
+**Turn a half-baked idea into genuinely different finished versions, check them against what already exists, and get a straight verdict on which one to chase.**
 
-Next.js 15 (App Router) · React 19 · Tailwind v4 · Auth.js · OpenRouter · Tavily · Upstash Redis
+**Live:** [brainy-io.vercel.app](https://brainy-io.vercel.app)
 
-## Run locally
+<!-- Demo GIF: record a run and save it as docs/demo.gif -->
+![Brainy demo](docs/demo.gif)
+
+---
+
+## What it does
+
+- **Divergent directions.** Your idea is pushed 3, 6 or 9 deliberately different ways (a different customer, the opposite market, a hardware hack, a benchmark…), spread across several free models, next to an optional plain baseline for comparison.
+- **Live search.** While the models write, Brainy searches the web, GitHub, Devpost and arXiv for things that already do this.
+- **A judge's verdict.** A judge model reads every version and every search result, rates how crowded the space is (Fresh / Crowded / Very saturated), and picks the most unique direction that could still work. Every "similar thing" it cites is a real search result.
+- **Idea breeding and a lineage tree.** Pick any two ideas and cross them into three offspring that each inherit a trait from both parents. Keep breeding across generations, ask the judge to rank a generation, and explore the family tree (pan, zoom, ancestor highlighting).
+- **Hackathon: "Built before".** Similar past Devpost projects, each rated for how close it is, plus "the twist none of them tried".
+- **Research: "Papers that almost did this".** The closest arXiv papers, what each did and didn't do, and the gap your idea fills. The judge flags it when it isn't sure.
+
+The site stays black and white until a real result is cooked, then blooms into colour.
+
+---
+
+## Architecture
+
+### One run
+
+```mermaid
+flowchart LR
+    B["Browser<br/>(lib/run.ts)"] -->|"POST idea + run setup<br/>(+ own key in header)"| E["/api/expand"]
+    E --> G{"Signed in?<br/>Auth.js"}
+    G -->|no| X401["401"]
+    G -->|yes| Q{"Upstash<br/>runs left + reserve<br/>shared calls"}
+    Q -->|"not enough"| X429["429: try Quick<br/>or add a key"]
+    Q -->|reserved| P["Run in parallel"]
+    P --> S["Search: query writer, then<br/>Tavily · GitHub · Devpost · arXiv"]
+    P --> M["Directions + baseline<br/>(free models, round-robin,<br/>health-aware fallbacks)"]
+    S --> J["Judge<br/>(gets the rest of the time budget)"]
+    M --> J
+    S -.->|search event| N
+    M -.->|version events| N
+    J -->|"take event"| N["NDJSON stream<br/>one finished JSON object per line"]
+    N --> B
+```
+
+The stream sends `start → search / baseline / version (in any order) → take → done`, each event the moment its piece is finished. When the run ends, unused reserved calls go back to the shared pool.
+
+### Where data lives
+
+| Data | Where | Notes |
+| --- | --- | --- |
+| History, saved results, family trees, settings | **Browser `localStorage`** (default) | Works without any server-side storage |
+| The same, when the user opts in | **Neon Postgres** via Drizzle ORM | `users`, `results`, `user_settings`, all scoped to the session's user |
+| Bring-your-own API keys | **Browser only** | Sent per request in a header, never stored or logged |
+| Runs-left counters, shared call pool, model health, model list cache, arXiv cache | **Upstash Redis** | Counts, flags and cached public search results; nothing tied to an account except daily counts |
+
+---
+
+## Engineering decisions
+
+**Streaming finished JSON events, not partial JSON.** Each model call is validated against its schema on the server and only then sent as one complete NDJSON line. The browser never parses half a JSON object, a failed direction is simply missing, and results fill in as they finish (the search, each direction, then the verdict).
+
+**Free-model health tracking and fallback chains.** The model list comes live from OpenRouter, cached for an hour, filtered to free text models with at least 32k context and no tiny or special-purpose models. A 429, 5xx or timeout marks a model *busy* for 10 minutes, and a 404 marks it *unavailable* for an hour, in one shared Upstash hash. Auto picks and every fallback chain skip flagged models. Key-wide limits (like OpenRouter's daily free cap) never get blamed on a model. Directions spread round-robin across 1–4 models, and each call tries at most 3 models, so one bad model can't drain the quota.
+
+**A shared quota counted in model calls, with atomic reservation.** The server key's daily allowance counts *calls*, not runs, because fallbacks and retries cost real requests. A run reserves its estimated calls up front in a single Lua script, so two concurrent runs can't both take the last few. Extra calls draw from whatever is left, and unused calls go back at the end. When OpenRouter reports its daily free cap, the pool is marked out until midnight UTC. Run sizes (Quick ~5, Standard ~8, Full ~12 calls) and an inline warning let users trade depth for quota.
+
+**Bring-your-own keys that never leave the browser.** Keys sit in `localStorage` and travel per request in a header. The server format-checks them, uses them for that one request, and never stores, logs or echoes them. If a key is rejected, the user is told so; Brainy never quietly falls back to its own key.
+
+**Privacy-first, opt-in sync.** Everything is local by default. Turning on sync uploads existing results. After that, each change is queued in `localStorage` (so closing the tab loses nothing) and sent shortly after. Other devices pull only what changed since their last pull: the newer copy of a result wins, and deletions made elsewhere are applied. Turning sync off asks whether to keep or delete the cloud copy, and "Delete my data" wipes the cloud copy and the local one.
+
+**Account linking on verified email only.** One person signing in with Google on their phone and GitHub on their laptop should be one account, with one runs-left counter and one synced history. Accounts are merged on email only when the provider vouches for it: Google's `email_verified`, or GitHub's primary address marked verified in its emails API. Otherwise the id falls back to the provider id, so nobody can add someone else's address to an account and inherit their data.
+
+**Public share links with sanitised content.** A synced result can be made public at `/r/[slug]`: read-only, no sign-in needed, its own social preview image, `noindex`. Slugs are 72 random bits. Uploads are size-capped and every `url` field is reduced to plain `http(s)` before storing, so a crafted result can't put a `javascript:` link on a public page. Sharing state is decided by the server, never taken from the client.
+
+**Grounded citations.** The judge refers to search results by id, and the server looks up every title, link, author and year itself, so it can't invent a paper, project or URL.
+
+---
+
+## Tech stack
+
+- **App:** Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS v4
+- **Auth:** Auth.js v5 (Google, GitHub), JWT sessions
+- **AI:** OpenRouter (free models on the server key; any model on a user's own key)
+- **Search:** Tavily (web, and Devpost via domain filter), GitHub search API, arXiv API
+- **Data:** Neon Postgres + Drizzle ORM (opt-in sync), Upstash Redis + `@upstash/ratelimit`
+- **Hosting:** Vercel
+
+---
+
+## Running locally
 
 ```bash
-cp .env.example .env.local   # then fill in the keys
+cp .env.example .env.local   # fill in the values (see comments in the file)
 npm install
 npm run dev                  # http://localhost:3000
 ```
 
-`OPENROUTER_API_KEY` and the `AUTH_*` sign-in vars are required. Leave the Upstash vars blank to
-turn daily limits off. **Set them for any public deploy**, or limits are off there too.
-Redis config is read from `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`,
-falling back to `KV_REST_API_URL` / `KV_REST_API_TOKEN` (the names Vercel's
-Upstash integration creates), so either pair works.
+- **Required:** `OPENROUTER_API_KEY`, `AUTH_SECRET` (`npx auth secret`), and a Google and/or GitHub OAuth app (`AUTH_GOOGLE_*`, `AUTH_GITHUB_*`) with callback `http://localhost:3000/api/auth/callback/<provider>`.
+- **Optional:** `TAVILY_API_KEY` (web search), `GITHUB_TOKEN` (higher GitHub search limits), `GLOBAL_DAILY_CALLS` (shared pool size, default 45).
+- **Limits:** leave the Upstash vars blank to turn limits off locally. Always set them for a public deploy.
+- **Sync:** point `DATABASE_URL` / `DATABASE_URL_UNPOOLED` at a **Neon dev branch** so local testing never touches production data, then apply migrations:
 
-## Free-only mode: run size, models and judge
+  ```bash
+  npm run db:migrate        # uses DATABASE_URL_UNPOOLED
+  npm run db:generate       # after changing lib/server/db/schema.ts
+  ```
 
-Runs on the server's `OPENROUTER_API_KEY` only ever use **free** OpenRouter models.
+  Leave both blank to run without sync.
 
-- **Run size** (Ask page → Advanced, remembered in Settings): Quick = 3 directions
-  (~5 model calls), Standard = 6 (~8), Full = 9 (~12). The estimate is directions
-  + baseline + search-query writer + judge (`estimateCalls` in `lib/run-plan.ts`);
-  the baseline is on by default only for Full, and both it and live search can be
-  toggled. Quick is the default without your own key, Full with one. Which
-  directions a smaller run keeps is set per purpose in `lib/run-plan.ts`.
-- **Models**: `lib/server/catalog.ts` fetches OpenRouter's models API, keeps
-  free text models with at least 32k context, drops small (< 12B by id) and
-  special-purpose ones (safety, code, nano...), and caches the list for an hour
-  in Upstash. Users pick 1-4 generators (default Auto: 3 healthy free models);
-  directions are spread round-robin across them, each with up to 2 healthy free
-  fallbacks.
-- **Health** (`lib/server/health.ts`): a 429, 5xx or timeout marks a model busy
-  for 10 minutes, a 404 unavailable for an hour, in one Upstash hash. Pickers
-  show the dots; Auto and every fallback chain skip flagged models.
-- **Judge**: Auto walks healthy free judges (`JUDGE_MODEL` first if it's a free
-  model in the list), or the user picks one. Generation must finish 115s into
-  the run, so the judge always gets the remaining ~155s. If the verdict still
-  fails, **Try another judge** (`POST /api/judge`) re-runs only the judge on the
-  directions and the search results the browser kept with the result. It
-  doesn't use up a run but has its own cap (10/day).
-- **Own key**: users with their own OpenRouter key can also pick paid models,
-  labelled with their price; defaults stay the free Auto picks.
+Scripts: `npm run dev` · `npm run build` · `npm run lint`
 
-## Bring your own key
+---
 
-Settings → API keys lets a visitor add their own OpenRouter key (and, optionally,
-a Tavily key). Keys live only in that browser's localStorage (`lib/keys.ts`) and
-travel per request in the `x-user-openrouter-key` / `x-user-tavily-key` headers.
-`lib/server/guard.ts` format-checks them and the routes use them for that request
-only: they are never stored, logged or echoed back. If a user's key is refused,
-the run fails with "Your key was rejected" rather than quietly using the server key.
+## How it was built
 
-Runs on a visitor's own key skip the 5 free runs (an anti-abuse cap of 50/day
-applies) and never touch the shared pool.
+Brainy was built with [Claude Code](https://claude.com/claude-code), Anthropic's agentic coding tool, as the implementation agent, with me as the lead. I defined the product, set the requirements for each stage, reviewed every plan before approving it, made the architecture and security calls, and tested each release on the live site.
 
-## The shared free pool
+Decisions I made along the way:
 
-Every model call made on the server key counts against `GLOBAL_DAILY_CALLS`
-(default 45), stored in Upstash per UTC day (`lib/server/quota.ts`). A request
-reserves its estimated calls up front with one atomic Lua script, so concurrent
-runs can't both take the last few; if fewer are left than the estimate, it's
-refused with "Not enough free fuel left today for this run size". Fallbacks and
-retries beyond the estimate take one more each while any are left; once the
-pool is dry, further calls are refused and the run keeps its partial results.
-Unused reservations are handed back at the end, so the count is real calls.
-When OpenRouter answers with its daily free-model limit (`free-models-per-day`),
-the pool is marked out until midnight UTC and visitors see "Brainy's free fuel
-is out for today". The Ask page shows "Shared free requests left today: N".
+- **Privacy-first storage:** local by default, with cloud sync strictly opt-in.
+- **Bring-your-own key**, added after user feedback, so heavy users aren't limited by the shared pool.
+- **Free-only mode** on the server key, with user-chosen run sizes and a calls-based shared quota instead of a run count.
+- **Verified-email-only account linking**, so accounts are never merged on an unverified address.
+- **The colour reveal reserved for real cooked results**; the home-page sample stays monochrome.
+- **A separate Neon dev branch** for local work, so testing never touches production data.
 
-## Idea breeding
+Process: staged builds, each following plan → review → build → regression checklist → deploy.
 
-On a finished result, select exactly two ideas (directions on the Directions tab,
-or any node in the tree) and press **Cross**: one model call (`/api/cross`) breeds
-3 offspring that fuse a trait from each parent, each with an "Inherits X from A,
-Y from B" line. Offspring can be crossed again (generation 2, 3, ...), saved, and
-judged per generation (`/api/judge-generation`). Each cross or judge counts as
-one run (or one own-key run) and at least one call from the shared pool.
+---
 
-The tree lives in the stored result as `lineage` (`lib/lineage.ts`, `lib/breed.ts`),
-so History and Saved reopen it; older results simply have none. The Lineage tab
-draws it as plain SVG (`app/components/LineageTree.tsx`): left to right on wide
-screens, top to bottom on narrow ones, with pan, pinch / Ctrl+scroll zoom and
-ancestor lines lit on hover or focus.
+## Credits
 
-## Prior work: Devpost and arXiv
-
-- **Hackathon** runs also search past hackathon projects with Tavily limited to
-  `devpost.com` project pages (Devpost has no public API; it is never scraped).
-  The judge keeps the genuinely similar ones, rates each high / medium / low,
-  and names "the twist none of them tried". The card says "We found N similar
-  hackathon projects", or "No close matches found, which is a good sign".
-- **Research** runs query the official arXiv API (`export.arxiv.org/api/query`):
-  one request per search, at most one every 3 seconds across all instances
-  (a Redis lock), with answers cached in Upstash for 24 hours. The judge keeps
-  the 3-5 closest papers, says what each did and didn't do, and names the gap,
-  flagging when it isn't sure.
-
-In both, the judge refers to results by id and the server looks up every
-title, link, author and year itself (`lib/openrouter.ts`), so a paper or
-project can never be invented. If the judge's reply is malformed or times out,
-it is retried once on the next model.
-
-## Sign-in
-
-Google and GitHub sign-in via Auth.js v5 (`auth.ts`), with JWT sessions (no sessions table).
-The account id is `email:<address>` **only when the provider verifies the email**
-(Google's `email_verified`; GitHub's primary address marked verified in its emails
-API), so signing in with Google on one device and GitHub on another is one account
-with one runs-left counter. Without a verified email it falls back to
-`<provider>:<account id>`; accounts are never merged on an unverified address.
-Sessions from the older id scheme are signed out once (`ID_VERSION` in `auth.ts`).
-Home, About and `/login` are public; `middleware.ts` sends signed-out visitors on
-any other page to `/login?callbackUrl=...`, and `/api/expand` returns 401 on its own
-check. Free runs are limited per user (5), with a looser per-IP backup (15), and
-share the pool of model calls above. Each OAuth app needs these callback URLs:
-
-- `http://localhost:3000/api/auth/callback/google` and `.../github`
-- `https://brainy-io.vercel.app/api/auth/callback/google` and `.../github`
-
-## Cloud sync (opt-in)
-
-Off by default: history, saved results and settings live in localStorage. Settings →
-"Sync history across devices" keeps a copy in Postgres (Neon via Vercel Storage,
-`DATABASE_URL`), using Drizzle ORM (`lib/server/db/schema.ts`): `users`, `results`
-(the full result JSON incl. lineage, run plan and kept search results; saved flag;
-`is_public`; `share_slug`) and `user_settings`.
-
-- `lib/sync.ts` (browser): turning on uploads local results, then every change in
-  `lib/history.ts` / `lib/settings.ts` (runs, crosses, re-judges, saves, deletes) is
-  queued in localStorage and sent shortly after. On load and when the tab comes back it
-  pulls changes since its last pull; the newer copy of a result wins, and a result
-  synced before but gone from the cloud was deleted elsewhere. Turning off asks
-  whether to keep or delete the cloud copy.
-- `lib/server/sync.ts`: every query is scoped to the session's user id; writes are
-  refused unless that user has sync on; uploads are size-capped and every `url` is
-  cleaned to http(s).
-- "Make public" on a synced result serves it read-only at `/r/[slug]` (no sign-in,
-  its own social image, `noindex`). Settings → "Delete my data" removes the cloud copy
-  and this browser's history, settings and keys.
-- API keys never leave the browser. Upstash stays for rate limits, quota and model
-  health only.
-
-Migrations: `npm run db:generate` after changing the schema, then
-`DATABASE_URL_UNPOOLED=... npm run db:migrate` (all Vercel environments share one
-Neon database).
-
-## How it fits together
-
-- `app/api/expand/route.ts`: the main run. `POST` streams
-  newline-delimited JSON events (`lib/stream.ts`) as each model finishes.
-- `app/api/cross`, `app/api/judge-generation`: idea breeding; `app/api/judge`:
-  "Try another judge"; `app/api/models`: the picker's model list with health;
-  `app/api/keys/test` checks a visitor's own key. All model routes share
-  `lib/server/guard.ts` (sign-in, keys, limits) and `lib/server/models.ts` (which
-  models run).
-- `lib/search.ts`: web, GitHub, Devpost (via Tavily) and arXiv searches.
-- `lib/run.ts`: reads that stream in the browser and fills in a live result.
-- `lib/history.ts`, `lib/settings.ts`: history, saved results and settings,
-  all kept in the visitor's localStorage.
-- `lib/reveal.ts`: "monochrome until it's cooked". The site is black and white;
-  a finished result sets `<html data-cooked>`, which swaps the colour tokens in
-  `app/globals.css` and fades in the gradient mesh and colour logo.
-- `app/components/`: UI. Pages live in `app/<route>/page.tsx`.
-
-## Scripts
-
-`npm run dev` · `npm run build` · `npm run lint`
+Built by Rohith · [github.com/rohithkarning-debug](https://github.com/rohithkarning-debug)
